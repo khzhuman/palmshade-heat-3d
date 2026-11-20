@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -7,11 +7,19 @@ const projectDirectory = dirname(fileURLToPath(import.meta.url));
 const bundleDirectory = resolve(process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 mkdirSync(bundleDirectory, { recursive: true });
 
+let copiedGameFiles = 0;
 for (const directoryName of ['game', 'screenshots']) {
   const from = resolve(projectDirectory, directoryName);
   const to = resolve(bundleDirectory, directoryName);
   if (existsSync(from) && from !== to) {
-    cpSync(from, to, { recursive: true, force: true });
+    cpSync(from, to, {
+      recursive: true,
+      force: true,
+      filter: (source) => {
+        if (directoryName === 'game' && lstatSync(source).isFile()) copiedGameFiles++;
+        return true;
+      },
+    });
   }
 }
 
@@ -23,4 +31,5 @@ const dossierContents = buildDossier(bundleDirectory, {
   game_path_max_bytes: 1000,
 });
 writeFileSync(resolve(bundleDirectory, 'dossier.json'), dossierContents);
+console.error(`Copied ${copiedGameFiles} game files to ${bundleDirectory}`);
 console.log(`Palmshade game bundle prepared at ${bundleDirectory}`);
