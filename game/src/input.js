@@ -1,50 +1,82 @@
-export const keys = Object.create(null);
-export const mouse = { x: 0, y: 0, down: false };
+const keyMap = Object.freeze({
+  w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD',
+  e: 'KeyE', m: 'KeyM', shift: 'ShiftLeft', space: 'Space',
+  arrowup: 'ArrowUp', arrowdown: 'ArrowDown',
+  arrowleft: 'ArrowLeft', arrowright: 'ArrowRight'
+});
 
-const wentDown = new Set();
-let listening = false;
+const down = new Set();
+const pressed = new Set();
+const released = new Set();
 
-export function initInput() {
-  if (listening) return;
-  listening = true;
+export const mouse = {
+  x: 0,
+  y: 0,
+  buttons: new Set(),
+  pressed: new Set(),
+  released: new Set()
+};
 
-  window.addEventListener('keydown', event => {
-    if (!keys[event.code]) wentDown.add(event.code);
-    keys[event.code] = true;
-  });
-
-  window.addEventListener('keyup', event => {
-    keys[event.code] = false;
-  });
-
-  window.addEventListener('blur', () => {
-    for (const code of Object.keys(keys)) keys[code] = false;
-    mouse.down = false;
-    wentDown.clear();
-  });
-
-  window.addEventListener('pointermove', event => {
-    mouse.x = event.clientX;
-    mouse.y = event.clientY;
-  });
-
-  window.addEventListener('pointerdown', event => {
-    mouse.x = event.clientX;
-    mouse.y = event.clientY;
-    if (event.button === 0) mouse.down = true;
-  });
-
-  window.addEventListener('pointerup', event => {
-    mouse.x = event.clientX;
-    mouse.y = event.clientY;
-    if (event.button === 0) mouse.down = false;
-  });
+function codeFor(key) {
+  if (keyMap[key]) return keyMap[key];
+  if (key.startsWith('Key') || key.startsWith('Arrow') || key === 'Space') return key;
+  return key.length === 1 ? `Key${key.toUpperCase()}` : key;
 }
 
-export function pressed(code) {
-  return wentDown.has(code);
+export function isDown(key) {
+  return down.has(codeFor(key.toLowerCase?.() ?? key));
 }
 
-export function endFrame() {
-  wentDown.clear();
+export function wasPressed(key) {
+  return pressed.has(codeFor(key.toLowerCase?.() ?? key));
+}
+
+export function wasReleased(key) {
+  return released.has(codeFor(key.toLowerCase?.() ?? key));
+}
+
+export function isMouseDown(button = 0) {
+  return mouse.buttons.has(button);
+}
+
+export function wasMousePressed(button = 0) {
+  return mouse.pressed.has(button);
+}
+
+export function wasMouseReleased(button = 0) {
+  return mouse.released.has(button);
+}
+
+window.addEventListener('keydown', (event) => {
+  const code = event.code;
+  if (code === 'Space' || code.startsWith('Arrow')) event.preventDefault();
+  if (!down.has(code)) pressed.add(code);
+  down.add(code);
+});
+
+window.addEventListener('keyup', (event) => {
+  down.delete(event.code);
+  released.add(event.code);
+});
+
+window.addEventListener('mousemove', (event) => {
+  mouse.x = event.clientX;
+  mouse.y = event.clientY;
+});
+
+window.addEventListener('mousedown', (event) => {
+  if (!mouse.buttons.has(event.button)) mouse.pressed.add(event.button);
+  mouse.buttons.add(event.button);
+});
+
+window.addEventListener('mouseup', (event) => {
+  mouse.buttons.delete(event.button);
+  mouse.released.add(event.button);
+});
+
+export function endInputFrame() {
+  pressed.clear();
+  released.clear();
+  mouse.pressed.clear();
+  mouse.released.clear();
 }

@@ -1,7 +1,9 @@
-export function makeRng(seed) {
+let gameRng = Math.random;
+
+export function createRng(seed) {
   let state = Number(seed) >>> 0;
-  return function nextRandom() {
-    state = (state + 0x6d2b79f5) >>> 0;
+  return function rng() {
+    state = (state + 0x6d2b79f5) | 0;
     let value = state;
     value = Math.imul(value ^ (value >>> 15), value | 1);
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
@@ -9,17 +11,28 @@ export function makeRng(seed) {
   };
 }
 
-export function rngInt(rng, lo, hi) {
-  const low = Math.ceil(Math.min(lo, hi));
-  const high = Math.floor(Math.max(lo, hi));
-  return low + Math.floor(rng() * (high - low + 1));
+export function setGameRng(rngOrSeed = Math.random) {
+  gameRng = typeof rngOrSeed === 'function' ? rngOrSeed : createRng(rngOrSeed);
+  return gameRng;
 }
 
-export function rngRange(rng, lo, hi) {
-  return lo + (hi - lo) * rng();
+export function getGameRng() {
+  return gameRng;
 }
 
-export function rngPick(rng, arr) {
-  if (arr.length === 0) return undefined;
-  return arr[Math.floor(rng() * arr.length)];
+export function range(min, max, rng = gameRng) {
+  return min + (max - min) * rng();
+}
+
+export function int(min, max, rng = gameRng) {
+  return Math.floor(range(min, max + 1, rng));
+}
+
+export function pick(items, rng = gameRng) {
+  if (!items.length) return undefined;
+  return items[int(0, items.length - 1, rng)];
+}
+
+export function chance(probability, rng = gameRng) {
+  return rng() < probability;
 }
