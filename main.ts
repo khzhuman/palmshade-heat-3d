@@ -5,6 +5,7 @@ import { buildDossier } from './vendor/makefun-game.ts';
 
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
 const bundleDirectory = resolve(process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
+try {
 mkdirSync(bundleDirectory, { recursive: true });
 
 let copiedGameFiles = 0;
@@ -33,3 +34,7 @@ const dossierContents = buildDossier(bundleDirectory, {
 writeFileSync(resolve(bundleDirectory, 'dossier.json'), dossierContents);
 console.error(`Copied ${copiedGameFiles} game files to ${bundleDirectory}`);
 console.log(`Palmshade game bundle prepared at ${bundleDirectory}`);
+} catch (error) {
+  console.error('PALMSHADE BUILD FAILED:', error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
