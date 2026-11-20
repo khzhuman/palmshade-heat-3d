@@ -1,6 +1,18 @@
 [
-  {"name":"1-hero.jpg","query":"?shot=hero&seed=1"},
-  {"name":"2-gunfight.jpg","query":"?shot=gunfight&seed=1"},
-  {"name":"3-complete.jpg","query":"?shot=complete&seed=1"},
-  {"name":"4-map.jpg","query":"?shot=map&seed=1"}
+  {
+    "name": "1-hero.jpg",
+    "query": "?shot=hero&seed=1"
+  },
+  {
+    "name": "2-gunfight.jpg",
+    "query": "?shot=gunfight&seed=1"
+  },
+  {
+    "name": "3-complete.jpg",
+    "query": "?shot=complete&seed=1"
+  },
+  {
+    "name": "4-map.jpg",
+    "query": "?shot=map&seed=1"
+  }
 ]

@@ -3,22 +3,24 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const sourceRoot = dirname(fileURLToPath(import.meta.url));
-const outputRoot = resolve(process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
-mkdirSync(outputRoot, { recursive: true });
-for (const folder of ['game', 'screenshots']) {
-  const source = resolve(sourceRoot, folder);
-  const destination = resolve(outputRoot, folder);
-  if (existsSync(source) && source !== destination) {
-    cpSync(source, destination, { recursive: true, force: true });
+const projectDirectory = dirname(fileURLToPath(import.meta.url));
+const bundleDirectory = resolve(process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
+mkdirSync(bundleDirectory, { recursive: true });
+
+for (const directoryName of ['game', 'screenshots']) {
+  const from = resolve(projectDirectory, directoryName);
+  const to = resolve(bundleDirectory, directoryName);
+  if (existsSync(from) && from !== to) {
+    cpSync(from, to, { recursive: true, force: true });
   }
 }
-const dossier = buildDossier(outputRoot, {
+
+const dossierContents = buildDossier(bundleDirectory, {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
   game_max_files: 993,
   game_max_bytes: 50331648,
   game_path_max_bytes: 1000,
 });
-writeFileSync(resolve(outputRoot, 'dossier.json'), dossier);
-console.log(`Palmshade game bundle prepared at ${outputRoot}`);
+writeFileSync(resolve(bundleDirectory, 'dossier.json'), dossierContents);
+console.log(`Palmshade game bundle prepared at ${bundleDirectory}`);
