@@ -1,186 +1,135 @@
-import { CITY, DISTRICTS, PALETTE } from './config.js';
-import { rngRange, rngPick } from './random.js';
-
-const T = window.THREE;
-const materials = new Map();
-export function material(color, extra = {}) {
-  const key = String(color) + JSON.stringify(extra);
-  if (!materials.has(key)) materials.set(key, new T.MeshStandardMaterial({ color, roughness: 0.86, ...extra }));
-  return materials.get(key);
-}
-export function box(parent, w, h, d, color, x = 0, y = 0, z = 0, extra = {}) {
-  const mesh = new T.Mesh(new T.BoxGeometry(w, h, d), material(color, extra));
-  mesh.position.set(x, y, z);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  parent.add(mesh);
-  return mesh;
-}
-function palm(parent, x, z, scale = 1) {
-  const tree = new T.Group();
-  tree.position.set(x, 0, z);
-  tree.scale.setScalar(scale);
-  const trunk = new T.Mesh(new T.CylinderGeometry(0.25, 0.48, 9, 6), material(0x95705b));
-  trunk.position.y = 4.5;
-  trunk.rotation.z = 0.09;
-  tree.add(trunk);
-  for (let i = 0; i < 7; i++) {
-    const leaf = new T.Mesh(new T.ConeGeometry(1.25, 6.6, 3), material(i % 2 ? 0x398776 : 0x236f64));
-    const a = i * Math.PI * 2 / 7;
-    leaf.position.set(Math.sin(a) * 2, 8.4, Math.cos(a) * 2);
-    leaf.rotation.set(Math.cos(a) * 1.25, a, -Math.sin(a) * 1.25);
-    tree.add(leaf);
-  }
-  parent.add(tree);
-}
-export function makePerson(color = 0xefb582) {
+/* City coordinates use y-up, with streets every 60 metres. Collider bounds
+ * are world-space {minX,maxX,minZ,maxZ}; only solid structures are included. */
+export function buildWorld(scene) {
+  const T = globalThis.THREE;
+  if (!T) throw new Error('Call loadThree() before buildWorld().');
   const root = new T.Group();
-  const body = box(root, 0.72, 1.02, 0.42, color, 0, 1.2, 0);
-  const head = box(root, 0.47, 0.5, 0.46, 0xdba179, 0, 1.99, 0);
-  box(head, 0.49, 0.14, 0.48, 0x332c38, 0, 0.25, 0);
-  const legs = [-1, 1].map(side => box(root, 0.27, 0.83, 0.31, 0x34475b, side * 0.2, 0.42, 0));
-  const arms = [-1, 1].map(side => {
-    const pivot = new T.Group();
-    pivot.position.set(side * 0.49, 1.63, 0);
-    box(pivot, 0.23, 0.78, 0.25, color, 0, -0.36, 0);
-    root.add(pivot);
-    return pivot;
-  });
-  root.userData.rig = { body, head, legs, arms };
-  return root;
-}
-export function posePerson(root, state, phase = 0) {
-  const { arms, legs, body, head } = root.userData.rig;
-  const cower = state === 'cower';
-  body.position.y = cower ? 0.7 : 1.2;
-  body.rotation.x = cower ? 0.55 : 0;
-  head.position.y = cower ? 1.22 : 1.99;
-  head.rotation.x = cower ? 0.65 : 0;
-  arms.forEach((arm, i) => {
-    arm.position.y = cower ? 1.15 : 1.63;
-    arm.rotation.set(cower ? -2.5 : state === 'flee' ? -1.8 : Math.sin(phase + i * Math.PI) * 0.45, 0, cower ? (i ? -0.55 : 0.55) : 0);
-  });
-  legs.forEach((leg, i) => {
-    leg.position.y = cower ? 0.25 : 0.42;
-    leg.rotation.x = cower ? -0.95 : Math.sin(phase + i * Math.PI) * (state === 'idle' ? 0 : 0.55);
-  });
-}
-export function createWorld(scene, rng) {
-  const root = new T.Group();
+  root.name = 'Palmshade';
   scene.add(root);
-  const minX = Math.min(...DISTRICTS.map(d => d.x0));
-  const maxX = Math.max(...DISTRICTS.map(d => d.x1));
-  const minZ = Math.min(...DISTRICTS.map(d => d.z0));
-  const maxZ = Math.max(...DISTRICTS.map(d => d.z1));
-  const bounds = { minX, maxX, minZ, maxZ };
-  const colliders = [];
-  const peds = [];
-  const roadsX = [], roadsZ = [];
-  for (let x = minX; x <= maxX; x += CITY.roadEvery) roadsX.push(x);
-  for (let z = minZ; z <= maxZ; z += CITY.roadEvery) roadsZ.push(z);
-  const districtAt = (x, z) => DISTRICTS.find(d => x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1) || DISTRICTS[0];
-  const center = name => {
-    const d = DISTRICTS.find(d => d.name === name) || DISTRICTS[0];
-    return new T.Vector3((d.x0 + d.x1) / 2, 0, (d.z0 + d.z1) / 2);
-  };
-  box(root, maxX - minX + 35, 0.8, maxZ - minZ + 35, 0xc8b48f, (minX + maxX) / 2, -0.6, (minZ + maxZ) / 2);
-  box(root, 180, 0.3, maxZ - minZ + 500, 0x398e9c, maxX + 105, -0.65, (minZ + maxZ) / 2, { metalness: 0.28, roughness: 0.35 });
-  box(root, 30, 0.2, maxZ - minZ, 0xf3d7ac, maxX + 15, -0.12, (minZ + maxZ) / 2);
-  for (const x of roadsX) {
-    box(root, 17, 0.12, maxZ - minZ + 20, 0x444956, x, -0.06, (minZ + maxZ) / 2);
-    for (let z = minZ; z < maxZ; z += 12) box(root, 0.16, 0.02, 5, 0xe7ca83, x, 0.015, z);
+  const colliders = [], labels = [], spawnPoints = [];
+  const shineShopPos = new T.Vector3(-34, 0, 18);
+  const maraPos = new T.Vector3(-179, 0, -150);
+  const ferryPos = new T.Vector3(-213, 0, -199);
+  let seed = 46819;
+  function rand() { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }
+  function material(geometry, color, glow = false) {
+    const c = new T.Color(color), count = geometry.attributes.position.count;
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) { colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b; }
+    geometry.setAttribute('color', new T.BufferAttribute(colors, 3));
+    return new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.83, ...(glow ? { emissive: color, emissiveIntensity: 0.65 } : {}) });
   }
-  for (const z of roadsZ) {
-    box(root, maxX - minX + 20, 0.13, 17, 0x444956, (minX + maxX) / 2, -0.05, z);
-    for (let x = minX; x < maxX; x += 12) box(root, 5, 0.02, 0.16, 0xe7ca83, x, 0.025, z);
+  function mesh(geometry, color, x, y, z, glow = false) {
+    const m = new T.Mesh(geometry, material(geometry, color, glow));
+    m.position.set(x, y, z); m.castShadow = y > 0.5; m.receiveShadow = true; root.add(m); return m;
   }
-  const landmarks = {
-    dock: center('Old Port'), neon: center('Neon Mile'), villa: center('Coral Heights'), flats: center('The Flats'),
-    shop: new T.Vector3(roadsX[2] || minX + 120, 0, (roadsZ[2] || minZ + 120) + 18),
-    ferry: new T.Vector3(maxX - 5, 0, maxZ - 60)
-  };
-  const reserved = Object.values(landmarks);
-  for (let ix = 0; ix < roadsX.length - 1; ix++) {
-    for (let iz = 0; iz < roadsZ.length - 1; iz++) {
-      const x = roadsX[ix] + 30, z = roadsZ[iz] + 30;
-      box(root, 40, 0.22, 40, 0xe2cbb1, x, 0, z);
-      const d = districtAt(x, z);
-      const port = d.name === 'Old Port', hill = d.name === 'Coral Heights';
-      for (let k = 0; k < 4; k++) {
-        const bx = x + (k % 2 ? 10 : -10), bz = z + (k < 2 ? -10 : 10);
-        if (reserved.some(v => Math.hypot(bx - v.x, bz - v.z) < 20)) continue;
-        const height = port ? rngRange(rng, 7, 13) : hill ? rngRange(rng, 5, 10) : rngRange(rng, 10, 35);
-        const color = rngPick(rng, [0xe7b4a0, 0xe8ccaa, 0x89b7af, 0xd496a9, 0xbcb4cb]);
-        box(root, 16, height, 16, color, bx, height / 2, bz);
-        box(root, 17, 0.55, 17, 0xf0dcc0, bx, height, bz);
-        colliders.push({ x: bx, z: bz, hx: 8.6, hz: 8.6, height });
-        for (let floor = 3; floor < height - 1; floor += 4) {
-          for (const side of [-1, 1]) {
-            box(root, 10, 1.5, 0.12, 0x416578, bx, floor, bz + side * 8.05, { emissive: 0x33516b, emissiveIntensity: 0.15 });
-            box(root, 0.12, 1.5, 10, 0x416578, bx + side * 8.05, floor, bz);
-          }
-        }
-        if (d.name === 'Neon Mile') box(root, 12, 0.4, 0.2, 0xff6fba, bx, 3, bz - 8.2, { emissive: 0xff3999, emissiveIntensity: 1.5 });
+  function box(x, y, z, w, h, d, color, solid = false, glow = false) {
+    const m = mesh(new T.BoxGeometry(w, h, d), color, x, y, z, glow);
+    if (solid) colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, mesh: m });
+    return m;
+  }
+  function sign(text, x, y, z, size = 12, color = '#fff4cd') {
+    const canvas = document.createElement('canvas'); canvas.width = 1024; canvas.height = 160;
+    const c = canvas.getContext('2d'); c.fillStyle = '#19353b'; c.fillRect(0, 0, 1024, 160);
+    c.strokeStyle = color; c.lineWidth = 8; c.strokeRect(8, 8, 1008, 144);
+    c.fillStyle = color; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = 'bold 72px sans-serif'; c.fillText(text, 512, 83, 970);
+    const tex = new T.CanvasTexture(canvas);
+    const s = new T.Sprite(new T.SpriteMaterial({ map: tex, depthWrite: false }));
+    s.position.set(x, y, z); s.scale.set(size, size / 6.4, 1); root.add(s); labels.push(s); return s;
+  }
+  function palm(x, z, h = 8) {
+    const trunk = mesh(new T.CylinderGeometry(0.23, 0.43, h, 6), 0x94724c, x, h / 2, z);
+    trunk.rotation.z = 0.08;
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3;
+      const leaf = mesh(new T.ConeGeometry(1.1, 5.4, 3), 0x497d50, x + Math.sin(a) * 1.8, h, z + Math.cos(a) * 1.8);
+      leaf.rotation.set(Math.cos(a) * 1.23, a, Math.sin(a) * 1.23);
+    }
+  }
+  function districtAt(x, z) { return z < 0 ? (x < 0 ? 'Old Port' : 'The Flats') : (x < 0 ? 'Coral Heights' : 'Neon Mile'); }
+  box(0, -0.4, 0, 480, 0.7, 480, 0xb9b88a);
+  const districts = [
+    { name: 'Old Port', x: -120, z: -120, color: 0xa5b0a2 },
+    { name: 'The Flats', x: 120, z: -120, color: 0xcdb68f },
+    { name: 'Coral Heights', x: -120, z: 120, color: 0xa7b987 },
+    { name: 'Neon Mile', x: 120, z: 120, color: 0xdfc5b3 }
+  ];
+  for (const d of districts) { box(d.x, -0.025, d.z, 240, 0.08, 240, d.color); sign(d.name.toUpperCase(), d.x, 30, d.z, 40); }
+  for (let n = -240; n <= 240; n += 60) {
+    box(n, 0.02, 0, 18, 0.14, 480, 0xbcb9ae); box(0, 0.025, n, 480, 0.14, 18, 0xbcb9ae);
+    box(n, 0.11, 0, 12, 0.08, 480, 0x485258); box(0, 0.115, n, 480, 0.08, 12, 0x485258);
+    for (let k = -228; k < 240; k += 12) {
+      if (Math.abs(k / 60 - Math.round(k / 60)) > 0.12) {
+        box(n, 0.16, k, 0.18, 0.015, 4.5, 0xeee0a1); box(k, 0.17, n, 4.5, 0.015, 0.18, 0xeee0a1);
       }
-      palm(root, x - 20, z - 20, rngRange(rng, 0.7, 1.1));
     }
   }
-  const shop = landmarks.shop;
-  box(root, 21, 8, 12, 0x58a6a5, shop.x, 4, shop.z + 7);
-  box(root, 15, 5, 0.2, 0x253e4b, shop.x, 2.5, shop.z + 0.8);
-  box(root, 23, 0.7, 14, 0xf9ac8c, shop.x, 8.2, shop.z + 7);
-  box(root, 16, 1.2, 0.3, 0x92ffe0, shop.x, 6.6, shop.z + 0.5, { emissive: 0x52dfbb, emissiveIntensity: 1 });
-  const villa = landmarks.villa;
-  box(root, 20, 7, 13, 0xf8ddc1, villa.x, 3.5, villa.z + 13);
-  box(root, 23, 0.6, 15, 0xd57876, villa.x, 7.2, villa.z + 13);
-  box(root, 12, 0.1, 7, 0x68c7ce, villa.x + 18, 0.1, villa.z + 12);
-  for (let z = minZ + 14; z < maxZ; z += 24) {
-    palm(root, maxX + 6, z, 1.15);
-    box(root, 2, 0.4, 4, 0xe99996, maxX + 22, 0.2, z);
-  }
-  const dock = landmarks.dock;
-  for (let i = 0; i < 3; i++) {
-    const x = dock.x - 22 + i * 20;
-    box(root, 2, 29, 2, 0xeeb859, x, 14.5, dock.z + 20);
-    box(root, 20, 1.3, 2, 0xeeb859, x + 8, 28, dock.z + 20);
-    box(root, 0.12, 18, 0.12, 0x404c59, x + 17, 18, dock.z + 20);
-    box(root, 12, 4, 5, i % 2 ? 0xd46e69 : 0x507a91, x, 2, dock.z - 16);
-  }
-  box(root, 18, 0.6, 42, 0x8c9a9f, landmarks.ferry.x + 8, 0.1, landmarks.ferry.z);
-  for (let i = 0; i < 100; i++) {
-    const street = rngPick(rng, roadsX);
-    const person = makePerson(rngPick(rng, PALETTE.pedTones || [0xe89a91, 0x55afa8, 0xeac665]));
-    person.position.set(street + (i % 2 ? 11 : -11), 0.12, rngRange(rng, minZ + 8, maxZ - 8));
-    root.add(person);
-    peds.push({ mesh: person, state: 'walk', fear: 0, cowers: i % 4 === 0, direction: i % 2 ? 1 : -1, phase: rng() * 6.28, away: new T.Vector3() });
-  }
-  function scare(position, radius = 35, gunfire = false) {
-    for (const ped of peds) {
-      if (ped.mesh.position.distanceTo(position) > radius) continue;
-      ped.fear = gunfire ? 4.5 : 2.7;
-      ped.state = gunfire && ped.cowers ? 'cower' : 'flee';
-      ped.away.copy(ped.mesh.position).sub(position).setY(0).normalize();
-      if (!ped.away.lengthSq()) ped.away.set(1, 0, 0);
+  const colors = [0xe7a792, 0xa7c8be, 0xe1c18b, 0xb6b3d2, 0xc7d8ad, 0xd88f91];
+  for (let x = -210; x <= 210; x += 60) for (let z = -210; z <= 210; z += 60) {
+    if ((x === -30 && z === 30) || (x < -150 && z < -90) || (x > 150 && z > 0)) continue;
+    const district = districtAt(x, z), villa = district === 'Coral Heights';
+    const h = villa ? 5 + rand() * 4 : 9 + rand() * (district === 'Neon Mile' ? 30 : 19);
+    const w = villa ? 22 : 25 + rand() * 10, depth = villa ? 19 : 25 + rand() * 10;
+    if (villa) {
+      box(x, 0.25, z, 42, 0.35, 42, 0x8caa77);
+      box(x + 14, 0.47, z + 8, 8, 0.1, 14, 0x65c4d2);
+      box(x, 0.8, z - 21, 43, 1.3, 0.6, 0xead8bd, true);
+      palm(x - 16, z + 14);
+    }
+    box(x, h / 2 + 0.2, z, w, h, depth, colors[Math.floor(rand() * colors.length)], true);
+    box(x, h + 0.5, z, w + 1, 0.7, depth + 1, villa ? 0xd67d61 : 0xe6dac4);
+    for (let y = 3; y < h - 1; y += 4) for (let dx = -w / 2 + 3; dx < w / 2 - 1; dx += 5) {
+      box(x + dx, y, z + depth / 2 + 0.06, 2.1, 1.8, 0.13, district === 'Neon Mile' ? 0xff80c9 : 0x466b79, false, district === 'Neon Mile');
+      box(x + dx, y, z - depth / 2 - 0.06, 2.1, 1.8, 0.13, 0x7197a4);
+    }
+    if (district === 'Neon Mile') sign(['SUNSET CLUB', 'CORAL ARCADE', 'HOTEL HEAT'][Math.floor(rand() * 3)], x, 5.5, z + depth / 2 + 0.3, 19, '#ff80cc');
+    if (district === 'The Flats') for (let j = 0; j < 2; j++) {
+      const sx = x - 12 + j * 15, sz = z + 21;
+      box(sx, 1, sz, 6, 2, 3, 0xa98155, true); box(sx, 3.3, sz, 8, 0.35, 5, j ? 0xe6b35c : 0xc57881);
+      for (const side of [-1, 1]) box(sx + side * 3, 2.1, sz, 0.15, 2.4, 0.15, 0x6a7460);
     }
   }
-  function blocked(x, z, radius = 1) {
-    return colliders.some(c => Math.abs(x - c.x) < c.hx + radius && Math.abs(z - c.z) < c.hz + radius);
+  // Beachfront and open sea lie beyond the eastern promenade.
+  box(221, 0.02, 123, 35, 0.1, 228, 0xefd39b);
+  box(305, -0.16, 0, 130, 0.12, 700, 0x469fae);
+  for (let z = 18; z < 230; z += 23) {
+    palm(201, z, 8 + rand() * 3);
+    mesh(new T.ConeGeometry(2.6, 1, 8), z % 2 ? 0xf0aa95 : 0x88c5bc, 223, 2.7, z);
+    box(223, 1.2, z, 0.12, 2.4, 0.12, 0xd9c39a);
   }
-  function update(dt) {
-    for (const ped of peds) {
-      ped.fear = Math.max(0, ped.fear - dt);
-      if (!ped.fear) ped.state = 'walk';
-      const p = ped.mesh.position;
-      const oldX = p.x, oldZ = p.z;
-      if (ped.state === 'flee') p.addScaledVector(ped.away, dt * 5.6);
-      if (ped.state === 'walk') p.z += ped.direction * dt * 1.1;
-      if (blocked(p.x, p.z, 0.5)) { p.x = oldX; p.z = oldZ; ped.away.applyAxisAngle(T.Object3D.DEFAULT_UP, 1.2); }
-      p.x = T.MathUtils.clamp(p.x, minX - 5, maxX + 26);
-      if (p.z < minZ + 4 || p.z > maxZ - 4) { ped.direction *= -1; p.z = T.MathUtils.clamp(p.z, minZ + 4, maxZ - 4); }
-      ped.mesh.rotation.y = ped.state === 'flee' ? Math.atan2(ped.away.x, ped.away.z) : ped.direction > 0 ? 0 : Math.PI;
-      ped.phase += dt * (ped.state === 'flee' ? 12 : 4);
-      posePerson(ped.mesh, ped.state, ped.phase);
-    }
+  // Working harbour: water basin, quays, cargo sheds and lifting cranes.
+  box(-219, -0.1, -153, 42, 0.1, 169, 0x438d9c);
+  box(-191, 0.6, -153, 13, 1.2, 168, 0x9a9b8b, true);
+  for (const z of [-210, -165, -120]) {
+    box(-215, 0.65, z, 44, 1.1, 10, 0x967a59);
+    box(-164, 6, z + 8, 25, 12, 25, 0xa1aaa2, true);
+    box(-164, 12.3, z + 8, 27, 0.7, 27, 0x637f84);
+    box(-195, 12, z - 10, 2, 24, 2, 0xe8b554, true);
+    box(-207, 24, z - 10, 27, 1.5, 1.5, 0xe8b554);
+    box(-218, 19, z - 10, 0.13, 10, 0.13, 0x424f51);
   }
-  return { root, bounds, roadsX, roadsZ, colliders, peds, landmarks, districtAt, blocked, scare, update };
+  const ramp = box(ferryPos.x, 0.6, ferryPos.z, 20, 0.6, 9, 0x90958b); ramp.rotation.z = -0.06;
+  sign('PALMSHADE FERRY', -204, 6, -199, 22);
+  // A deliberately clear forecourt supports repairs, deliveries and respawns.
+  box(-30, 0.2, 29, 42, 0.25, 42, 0xc4b8a0);
+  box(-30, 4.3, 43, 30, 8, 12, 0x55bcb5, true);
+  box(-30, 8.7, 43, 32, 0.7, 14, 0xf0cf83);
+  box(-30, 3.3, 36.9, 11, 5.5, 0.15, 0x294b59);
+  sign('SHINE SHOP', -30, 10.6, 36, 27, '#ffe184');
+  const shopMarker = mesh(new T.RingGeometry(3.5, 3.8, 40), 0x83f4d3, shineShopPos.x, 0.38, shineShopPos.z, true); shopMarker.rotation.x = -Math.PI / 2;
+  const maraMarker = mesh(new T.RingGeometry(1.7, 2.1, 24), 0xffce77, maraPos.x, 0.27, maraPos.z, true); maraMarker.rotation.x = -Math.PI / 2;
+  sign('MARA', maraPos.x, 4, maraPos.z, 7, '#ffd184');
+  for (let x = -180; x <= 180; x += 60) for (let z = -180; z <= 180; z += 60) {
+    box(x + 8, 3.8, z + 11, 0.2, 7.6, 0.2, 0x566c69);
+    box(x + 7, 7.6, z + 11, 2.5, 0.2, 0.5, 0x566c69);
+    box(x + 6, 7.45, z + 11, 0.8, 0.12, 0.6, 0xffe4a3, false, true);
+    if (z >= 0) palm(x + 10, z + 20, 7);
+    spawnPoints.push({ x: x + 17, y: 0.2, z: z + 3, heading: Math.PI / 2, district: districtAt(x + 17, z + 3), kind: 'traffic' });
+    spawnPoints.push({ x: x - 13, y: 0.2, z: z - 5, heading: -Math.PI / 2, district: districtAt(x - 13, z - 5), kind: 'parked' });
+  }
+  const ambient = new T.HemisphereLight(0xffe3b6, 0x59756d, 1.65); scene.add(ambient);
+  const sun = new T.DirectionalLight(0xffcf91, 2.3); sun.position.set(-160, 190, 80); sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -260, right: 260, top: 260, bottom: -260, near: 1, far: 650 }); scene.add(sun);
+  scene.background = new T.Color(0xf0bd99); scene.fog = new T.Fog(0xf0bd99, 170, 540);
+  return { root, colliders, shineShopPos, maraPos, ferryPos, districtAt, districts, spawnPoints, labels, bounds: { minX: -237, maxX: 237, minZ: -237, maxZ: 237 }, roadSpacing: 60, laneOffset: 3 };
 }

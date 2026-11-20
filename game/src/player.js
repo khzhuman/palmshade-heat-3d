@@ -1,162 +1,195 @@
-import { keys, pressed } from './input.js';
-import { makePerson, posePerson, box } from './world.js';
-import { forward, moveCar, syncCar } from './vehicles.js';
+import { isDown, wasPressed } from './input.js';
+import { START_CASH } from './config.js';
+import { cars, resolveCarBuildings, updateCarVisuals } from './vehicles.js';
 
-const T = window.THREE;
-export function createPlayer(scene, camera, world, vehicles, hooks = {}) {
-  const mesh = makePerson(0xefdbbd);
-  scene.add(mesh);
-  const gun = new T.Group();
-  box(gun, 0.16, 0.18, 0.65, 0x283849, 0, 0, 0.18);
-  box(gun, 0.14, 0.27, 0.18, 0x283849, 0, -0.17, 0);
-  gun.position.set(0.59, 1.53, 0.43);
-  mesh.add(gun);
-  const start = world.landmarks.shop.clone().add(new T.Vector3(-6, 0, -9));
-  mesh.position.copy(start);
-  const cameraTarget = start.clone();
-  const cameraPosition = start.clone().add(new T.Vector3(0, 8, -15));
-  camera.position.copy(cameraPosition);
-  const player = {
-    mesh, gun, car: null, mode: 'ON FOOT', health: 100, armour: 75, cash: 650,
-    weapon: 'PISTOL', yaw: 0, phase: 0, interactCooldown: 0, respawnCooldown: 0,
-    prompt: '', aiming: false, moving: false, cameraOverride: null,
-    get position() { return this.car ? this.car.mesh.position : this.mesh.position; },
-    get speed() { return this.car ? Math.abs(this.car.speed) : this.moving ? 5 : 0; }
-  };
-  function enter(car, silent = false) {
-    if (!car || car.disabled || car.occupied || player.car) return false;
-    const stolen = car.driver;
-    if (stolen) {
-      const driverMesh = makePerson(0xdca9be);
-      const side = forward(car.yaw + Math.PI / 2);
-      driverMesh.position.copy(car.mesh.position).addScaledVector(side, 2.4);
-      scene.add(driverMesh);
-      world.peds.push({ mesh: driverMesh, state: 'flee', fear: 8, cowers: false, direction: 1, phase: 0, away: side });
-    }
-    car.driver = false;
-    car.parked = false;
-    car.occupied = true;
-    player.car = car;
-    player.mode = 'DRIVE';
-    mesh.visible = false;
-    player.yaw = car.yaw;
-    if (!silent) {
-      hooks.onCrime?.(1, stolen ? 'Vehicle theft witnessed' : 'Vehicle theft reported', car.mesh.position);
-      hooks.onEvent?.(stolen ? 'DRIVER BAILED · VEHICLE TAKEN' : 'VEHICLE TAKEN');
-    }
-    return true;
+/* Mutable public singleton. position aliases currentCar.position in drive mode.
+ * createPlayer(scene, world, options?) returns this same object.
+ * updatePlayer(dt, {world, camera, input?, cars?, peds?, onSteal?}) runs once/frame.
+ * Optional input implements isDown(key) and wasPressed(key); keys accept codes
+ * or browser key names. Call before updateTraffic, then clear input edge state. */
+export const player = {
+  cash: START_CASH ?? 300, health: 100, armour: 0, mode: 'foot',
+  currentCar: null, position: null, heading: 0, mesh: null,
+  nearestCar: null, prompt: '', radius: 0.48, speed: 0, moving: false,
+  bailouts: [], cameraReady: false
+};
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const wrap = v => Math.atan2(Math.sin(v), Math.cos(v));
+let sceneRef, worldRef, cameraLook, footPosition;
+
+function humanoid(shirt = 0xe9b86f, skin = 0xb87956) {
+  const T = globalThis.THREE, root = new T.Group();
+  const materials = [shirt, skin, 0x354853, 0x353535].map(color => new T.MeshStandardMaterial({ color, roughness: 0.95 }));
+  function block(w, h, d, x, y, z, material) {
+    const m = new T.Mesh(new T.BoxGeometry(w, h, d), materials[material]); m.position.set(x, y, z); m.castShadow = true; root.add(m); return m;
   }
-  function exit() {
-    const car = player.car;
-    if (!car) return;
-    const side = forward(car.yaw + Math.PI / 2);
-    const exitPosition = car.mesh.position.clone().addScaledVector(side, 3.2);
-    if (world.blocked(exitPosition.x, exitPosition.z, 0.5)) exitPosition.copy(car.mesh.position).addScaledVector(side, -3.2);
-    mesh.position.copy(exitPosition).setY(0.12);
-    player.yaw = car.yaw;
-    car.occupied = false;
-    car.parked = true;
-    car.speed *= 0.4;
-    player.car = null;
-    player.mode = 'ON FOOT';
-    mesh.visible = true;
+  block(0.62, 0.65, 0.34, 0, 1.13, 0, 0);
+  block(0.4, 0.43, 0.39, 0, 1.68, 0, 1); block(0.43, 0.13, 0.4, 0, 1.91, -0.02, 3);
+  block(0.29, 0.1, 0.035, 0, 1.72, 0.21, 3);
+  const arms = [-1, 1].map(s => block(0.19, 0.64, 0.22, s * 0.43, 1.08, 0, 1));
+  const legs = [-1, 1].map(s => block(0.23, 0.65, 0.26, s * 0.17, 0.46, 0, 2));
+  for (const s of [-1, 1]) block(0.26, 0.16, 0.4, s * 0.17, 0.1, 0.07, 3);
+  root.userData.limbs = { arms, legs }; return root;
+}
+
+export function createPlayer(scene, world = {}, options = {}) {
+  const T = globalThis.THREE;
+  if (player.mesh?.parent) player.mesh.parent.remove(player.mesh);
+  for (const ped of player.bailouts) if (ped.mesh?.parent) ped.mesh.parent.remove(ped.mesh);
+  if (player.currentCar) player.currentCar.controlled = false;
+  sceneRef = scene; worldRef = world;
+  const p = options.position ?? world.shineShopPos ?? { x: -34, y: 0.2, z: 18 };
+  footPosition = new T.Vector3(p.x, 0.2, p.z); cameraLook = footPosition.clone();
+  Object.assign(player, { cash: options.cash ?? START_CASH ?? 300, health: 100, armour: 0, mode: 'foot', currentCar: null, position: footPosition,
+    heading: options.heading ?? 0, mesh: humanoid(), nearestCar: null, prompt: '', moving: false, speed: 0, bailouts: [], cameraReady: false, walkTime: 0 });
+  player.mesh.position.copy(footPosition); player.mesh.rotation.y = player.heading; scene.add(player.mesh);
+  return player;
+}
+
+function keys(source, edge, ...names) {
+  const fn = source?.[edge ? 'wasPressed' : 'isDown'] ?? (edge ? wasPressed : isDown);
+  return names.some(name => !!fn.call(source, name));
+}
+
+function freeAt(x, z, world, fleet, ignoreCar = null) {
+  const r = player.radius;
+  const bounds = world.bounds ?? { minX: -237, maxX: 237, minZ: -237, maxZ: 237 };
+  if (x < bounds.minX + r || x > bounds.maxX - r || z < bounds.minZ + r || z > bounds.maxZ - r) return false;
+  for (const b of world.colliders ?? []) {
+    const dx = x - clamp(x, b.minX, b.maxX), dz = z - clamp(z, b.minZ, b.maxZ);
+    if (dx * dx + dz * dz < r * r) return false;
   }
-  function respawn(position = world.landmarks.shop) {
-    exit();
-    mesh.position.copy(position).add(new T.Vector3(0, 0.12, -8));
-    player.health = 100;
-    player.armour = 50;
-    player.respawnCooldown = 2;
-    cameraTarget.copy(mesh.position);
-    cameraPosition.copy(mesh.position).add(new T.Vector3(0, 8, -15));
-  }
-  function hurt(amount) {
-    if (player.respawnCooldown > 0 || player.health <= 0) return;
-    const absorbed = Math.min(player.armour, amount * 0.65);
-    player.armour -= absorbed;
-    player.health = Math.max(0, player.health - (amount - absorbed));
-    if (player.health === 0) {
-      if (hooks.onDeath) hooks.onDeath();
-      else { player.cash = Math.max(0, player.cash - 200); respawn(); }
+  for (const c of fleet) if (c !== ignoreCar && Math.hypot(x - c.position.x, z - c.position.z) < r + c.radius) return false;
+  return true;
+}
+
+function ejectDriver(car, ctx) {
+  const ped = car.driver;
+  if (!ped) return;
+  const T = globalThis.THREE;
+  ped.state = 'fleeing'; ped.car = null; ped.fleeTimer = 8;
+  if (!ped.position?.set) ped.position = new T.Vector3();
+  ped.position.set(car.position.x + Math.cos(car.heading) * 3.3, 0.2, car.position.z - Math.sin(car.heading) * 3.3);
+  ped.fleeFrom = car.position.clone();
+  if (!ped.mesh) {
+    ped.mesh = humanoid(0x95b8ab); ped.mesh.position.copy(ped.position); sceneRef.add(ped.mesh);
+    ped.managedByPlayer = true; player.bailouts.push(ped);
+  } else { ped.mesh.visible = true; ped.mesh.position.copy(ped.position); }
+  if (ctx.peds && !ctx.peds.includes(ped)) ctx.peds.push(ped);
+  car.driver = null;
+  if (ctx.onSteal) ctx.onSteal(car, ped);
+}
+
+function interact(ctx, fleet, world) {
+  if (player.mode === 'drive') {
+    const c = player.currentCar;
+    if (Math.abs(c.speed) > 9) { player.prompt = 'SLOW DOWN TO EXIT'; return; }
+    for (const [side, forward] of [[-1, 0], [1, 0], [-1, -3], [1, -3], [0, -5]]) {
+      const x = c.position.x + Math.cos(c.heading) * side * 3.4 + Math.sin(c.heading) * forward;
+      const z = c.position.z - Math.sin(c.heading) * side * 3.4 + Math.cos(c.heading) * forward;
+      if (!freeAt(x, z, world, fleet)) continue;
+      footPosition.set(x, 0.2, z); player.position = footPosition;
+      c.controlled = false; c.parked = true; c.driver = null;
+      player.currentCar = null; player.mode = 'foot'; player.mesh.visible = true; player.speed = 0; return;
     }
+    player.prompt = 'EXIT BLOCKED'; return;
   }
-  function update(dt, time) {
-    player.interactCooldown = Math.max(0, player.interactCooldown - dt);
-    player.respawnCooldown = Math.max(0, player.respawnCooldown - dt);
-    if (pressed('Digit1')) player.weapon = 'FISTS';
-    if (pressed('Digit2')) player.weapon = 'PISTOL';
-    gun.visible = player.weapon === 'PISTOL';
-    player.prompt = '';
-    const near = player.car ? null : vehicles.nearest(player.position, 6);
-    if (near) player.prompt = 'E — STEAL';
-    if (player.car) player.prompt = 'E — EXIT';
-    if (pressed('KeyE') && !player.interactCooldown) {
-      if (player.car) exit();
-      else if (near) enter(near);
-      player.interactCooldown = 0.45;
-    }
-    if (player.car) {
-      const car = player.car;
-      const throttle = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
-      const steering = (keys.KeyA || keys.ArrowLeft ? 1 : 0) - (keys.KeyD || keys.ArrowRight ? 1 : 0);
-      const boost = keys.ShiftLeft || keys.ShiftRight;
-      const drag = keys.Space ? 3.4 : 0.36;
-      const acceleration = throttle > 0 ? 22 : car.speed > 2 ? 36 : 12;
-      car.speed += throttle * acceleration * dt;
-      if (!throttle || keys.Space) car.speed *= Math.exp(-drag * dt);
-      car.speed = T.MathUtils.clamp(car.speed, -12, boost ? 61 : 46);
-      if (car.disabled) car.speed *= Math.exp(-dt * 4);
-      car.steer = T.MathUtils.damp(car.steer, steering, 8, dt);
-      car.yaw += car.steer * Math.min(Math.abs(car.speed) / 10, 1) * Math.sign(car.speed) * dt * (keys.Space ? 1.9 : 1.05);
-      moveCar(car, dt, world, (_, impact) => { if (impact > 22) hurt(impact * 0.16); hooks.onCrash?.(car, impact); });
-      syncCar(car, dt, time);
-      player.yaw = car.yaw;
-      if (Math.abs(car.speed) > 20) world.scare(car.mesh.position.clone().addScaledVector(forward(car.yaw), 7), 16);
-      if (car.health <= 0) player.prompt = 'ENGINE WRECKED · E — EXIT';
-    } else {
-      player.aiming = !!(keys.KeyQ || keys.ControlLeft);
-      const horizontal = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
-      const vertical = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
-      const direction = new T.Vector3(horizontal, 0, vertical);
-      player.moving = direction.lengthSq() > 0;
-      if (player.moving) {
-        direction.normalize();
-        const speed = keys.ShiftLeft || keys.ShiftRight ? 9 : 4.8;
-        const p = mesh.position;
-        const dx = direction.x * speed * dt, dz = direction.z * speed * dt;
-        if (!world.blocked(p.x + dx, p.z, 0.55)) p.x += dx;
-        if (!world.blocked(p.x, p.z + dz, 0.55)) p.z += dz;
-        const b = world.bounds;
-        p.x = T.MathUtils.clamp(p.x, b.minX - 4, b.maxX + 27);
-        p.z = T.MathUtils.clamp(p.z, b.minZ - 4, b.maxZ + 4);
-        player.yaw = Math.atan2(direction.x, direction.z);
-      }
-      mesh.rotation.y = player.yaw;
-      player.phase += dt * (player.moving ? 10 : 0);
-      posePerson(mesh, player.moving ? 'walk' : 'idle', player.phase);
-    }
-    updateCamera(dt);
+  const c = player.nearestCar;
+  if (!c || c.health <= 0 || Math.abs(c.speed) > 12) return;
+  if (c.driver) ejectDriver(c, ctx);
+  c.driver = player; c.controlled = true; c.parked = false;
+  c.driftVelocity = new globalThis.THREE.Vector3();
+  player.currentCar = c; player.position = c.position; player.mode = 'drive'; player.mesh.visible = false;
+}
+
+function drive(dt, world, input) {
+  const c = player.currentCar;
+  const forward = keys(input, false, 'KeyW', 'w', 'W', 'ArrowUp');
+  const back = keys(input, false, 'KeyS', 's', 'S', 'ArrowDown');
+  const left = keys(input, false, 'KeyA', 'a', 'A', 'ArrowLeft');
+  const right = keys(input, false, 'KeyD', 'd', 'D', 'ArrowRight');
+  const boost = keys(input, false, 'ShiftLeft', 'ShiftRight', 'Shift');
+  const handbrake = keys(input, false, 'Space', ' ', 'Spacebar');
+  const oldHeading = c.heading, oldSpeed = c.speed;
+  if (c.health > 0) {
+    if (forward) c.speed += (c.speed < -0.5 ? 30 : boost ? 32 : 19) * dt;
+    if (back) c.speed -= (c.speed > 0.5 ? 36 : 12) * dt;
   }
-  function updateCamera(dt, snap = false) {
-    if (player.cameraOverride) {
-      camera.position.copy(player.cameraOverride.position);
-      camera.lookAt(player.cameraOverride.target);
-      return;
-    }
-    const p = player.position;
-    const driving = !!player.car;
-    const distance = driving ? 14 + Math.min(player.speed * 0.08, 4) : 10;
-    const desired = p.clone().addScaledVector(forward(player.yaw), -distance);
-    desired.y = p.y + (driving ? 7 : 6);
-    const look = p.clone().addScaledVector(forward(player.yaw), driving ? 6 : 3);
-    look.y += 1.2;
-    const blend = snap ? 1 : 1 - Math.exp(-dt * (driving ? 3.3 : 5));
-    cameraPosition.lerp(desired, blend);
-    cameraTarget.lerp(look, snap ? 1 : 1 - Math.exp(-dt * 5));
-    camera.position.copy(cameraPosition);
-    camera.lookAt(cameraTarget);
-    camera.fov = T.MathUtils.damp(camera.fov, driving ? 59 + Math.min(player.speed * 0.12, 7) : 58, 3, dt);
-    camera.updateProjectionMatrix();
+  c.speed *= Math.exp(-(handbrake ? 2.1 : forward || back ? 0.22 : 0.8) * dt);
+  if (c.health <= 0) c.speed *= Math.exp(-2 * dt);
+  c.speed = clamp(c.speed, -12, boost ? 49 : 33);
+  const steering = Number(left) - Number(right);
+  const authority = Math.min(1, Math.abs(c.speed) / 8) * Math.sign(c.speed);
+  c.heading += steering * authority * (handbrake ? 2.5 : 1.6) * dt;
+  const v = c.driftVelocity;
+  if (handbrake) {
+    v.x += Math.sin(oldHeading) * oldSpeed * dt * 0.8;
+    v.z += Math.cos(oldHeading) * oldSpeed * dt * 0.8;
   }
-  return Object.assign(player, { enter, exit, respawn, hurt, update, updateCamera });
+  v.multiplyScalar(Math.exp(-(handbrake ? 1.5 : 7) * dt));
+  c.position.x += (Math.sin(c.heading) * c.speed + v.x) * dt;
+  c.position.z += (Math.cos(c.heading) * c.speed + v.z) * dt;
+  if (resolveCarBuildings(c, world, dt)) v.set(0, 0, 0);
+  updateCarVisuals(c, 0); player.heading = c.heading; player.speed = c.speed;
+}
+
+function walk(dt, world, fleet, input) {
+  let x = Number(keys(input, false, 'KeyD', 'd', 'D', 'ArrowRight')) - Number(keys(input, false, 'KeyA', 'a', 'A', 'ArrowLeft'));
+  let z = Number(keys(input, false, 'KeyW', 'w', 'W', 'ArrowUp')) - Number(keys(input, false, 'KeyS', 's', 'S', 'ArrowDown'));
+  const length = Math.hypot(x, z); player.moving = length > 0 && player.health > 0;
+  player.speed = player.moving ? (keys(input, false, 'ShiftLeft', 'ShiftRight', 'Shift') ? 8.5 : 4.5) : 0;
+  if (player.moving) {
+    x /= length; z /= length;
+    const p = player.position, step = player.speed * dt;
+    if (freeAt(p.x + x * step, p.z, world, fleet)) p.x += x * step;
+    if (freeAt(p.x, p.z + z * step, world, fleet)) p.z += z * step;
+    player.heading += wrap(Math.atan2(x, z) - player.heading) * (1 - Math.exp(-16 * dt));
+  }
+  player.walkTime += dt * player.speed * 1.8;
+  const swing = player.moving ? Math.sin(player.walkTime) * 0.55 : 0;
+  const limbs = player.mesh.userData.limbs;
+  limbs.legs.forEach((m, i) => { m.rotation.x = i ? -swing : swing; });
+  limbs.arms.forEach((m, i) => { m.rotation.x = i ? swing : -swing; });
+  player.mesh.position.copy(player.position); player.mesh.rotation.y = player.heading;
+}
+
+function cameraFollow(dt, camera) {
+  if (!camera) return;
+  const T = globalThis.THREE, driving = player.mode === 'drive';
+  const distance = driving ? 9 + Math.min(4, Math.abs(player.speed) * 0.07) : 6;
+  const p = player.position, heading = driving ? player.currentCar.heading : player.heading;
+  const target = new T.Vector3(p.x - Math.sin(heading) * distance, p.y + (driving ? 5 : 4), p.z - Math.cos(heading) * distance);
+  const look = new T.Vector3(p.x, p.y + (driving ? 1.3 : 1.15), p.z);
+  if (driving) { look.x += Math.sin(heading) * 3; look.z += Math.cos(heading) * 3; }
+  if (!player.cameraReady) { camera.position.copy(target); cameraLook.copy(look); player.cameraReady = true; }
+  else { camera.position.lerp(target, 1 - Math.exp(-(driving ? 4 : 6) * dt)); cameraLook.lerp(look, 1 - Math.exp(-8 * dt)); }
+  camera.lookAt(cameraLook);
+}
+
+export function updatePlayer(dt, ctx = {}) {
+  if (!player.mesh) throw new Error('Call createPlayer() before updatePlayer().');
+  dt = clamp(dt, 0, 0.05);
+  const world = ctx.world ?? worldRef, fleet = ctx.cars ?? cars, input = ctx.input;
+  player.nearestCar = null; let nearest = 5;
+  if (player.mode === 'foot') for (const car of fleet) {
+    const d = Math.hypot(player.position.x - car.position.x, player.position.z - car.position.z);
+    if (d < nearest && car.health > 0 && Math.abs(car.speed) < 12) { nearest = d; player.nearestCar = car; }
+  }
+  player.prompt = player.mode === 'drive' ? 'E — EXIT' : player.nearestCar ? (player.nearestCar.driver ? 'E — STEAL' : 'E — ENTER') : '';
+  if (player.health > 0 && keys(input, true, 'KeyE', 'e', 'E')) interact(ctx, fleet, world);
+  if (player.mode === 'drive') drive(dt, world, input); else walk(dt, world, fleet, input);
+  // Only fallback bailing figures are owned here; later pedestrian AI can take
+  // ownership by setting managedByPlayer=false, preserving the same ped state.
+  for (const ped of player.bailouts) {
+    if (!ped.managedByPlayer || ped.state !== 'fleeing') continue;
+    const dx = ped.position.x - ped.fleeFrom.x, dz = ped.position.z - ped.fleeFrom.z, d = Math.hypot(dx, dz) || 1;
+    const x = ped.position.x + dx / d * 6 * dt, z = ped.position.z + dz / d * 6 * dt;
+    if (freeAt(x, ped.position.z, world, fleet)) ped.position.x = x;
+    if (freeAt(ped.position.x, z, world, fleet)) ped.position.z = z;
+    ped.mesh.position.copy(ped.position); ped.mesh.rotation.y = Math.atan2(dx, dz);
+    ped.mesh.userData.limbs.legs.forEach((leg, i) => { leg.rotation.x = Math.sin(player.walkTime + ped.fleeTimer * 12 + i * Math.PI) * 0.65; });
+    ped.fleeTimer -= dt; if (ped.fleeTimer <= 0) ped.state = 'walking';
+  }
+  cameraFollow(dt, ctx.camera);
+  return player;
 }
