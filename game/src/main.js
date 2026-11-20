@@ -77,9 +77,11 @@ export async function boot(){
       if(!staged){yaw=car.heading??yaw;car.speed=(car.speed+throttle*22*dt)*Math.exp(-dt*(keys.has('Space')?5:(throttle ? .18 : 1.2)));car.speed=Math.max(-12,Math.min(42,car.speed));yaw+=steer*dt*1.7*(car.speed<0?-1:1)*Math.min(1,Math.abs(car.speed)/5);car.position.add(new T.Vector3(Math.sin(yaw)*car.speed*dt,0,Math.cos(yaw)*car.speed*dt));car.heading=yaw;resolveCarBuildings(car,world,dt);updateCarVisuals(car,dt);}
       moveTo(car.position);
     }else{
-      yaw+=steer*dt*2.5;avatar.rotation.y=yaw;player.speed=Math.abs(throttle)*7;
-      if(throttle){const next=player.position.clone().add(new T.Vector3(Math.sin(yaw),0,Math.cos(yaw)).multiplyScalar(throttle*dt*7));if(!blocked(next,.35)&&Math.abs(next.x)<235&&Math.abs(next.z)<235)moveTo(next);}
-      avatar.userData.limbs.forEach(({leg,arm,side})=>{leg.rotation.x=arm.rotation.x=throttle?Math.sin(clock*9+side)*.45:0;});
+      const movement=new T.Vector3(-steer,0,throttle),moving=movement.lengthSq()>0;
+      player.speed=moving?(keys.has('ShiftLeft')||keys.has('ShiftRight')?8.5:7):0;
+      if(moving){movement.normalize();yaw=Math.atan2(movement.x,movement.z);const next=player.position.clone().add(movement.multiplyScalar(player.speed*dt));if(!blocked(next,.35)&&Math.abs(next.x)<235&&Math.abs(next.z)<235)moveTo(next);}
+      avatar.rotation.y=yaw;
+      avatar.userData.limbs.forEach(({leg,arm,side})=>{leg.rotation.x=arm.rotation.x=moving?Math.sin(clock*9+side)*.45:0;});
     }
     let nearest=null,distance=Infinity;for(const car of cars){const d=car.position.distanceTo(player.position);if(d<distance){nearest=car;distance=d;}}
     let prompt='';const atShop=player.position.distanceTo(missions.shop)<8,atMara=player.position.distanceTo(missions.mara)<6;
