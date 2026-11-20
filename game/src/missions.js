@@ -7,7 +7,7 @@ export const JOBS = [
 export function createMissions(T,scene,player,world,police,effects) {
   const vec=(p,f)=>p?.clone?p.clone():new T.Vector3(p?.x??f[0],0,p?.z??f[1]);
   const shop=vec(world.shineShopPos,[0,0]),mara=vec(world.maraPos,[8,8]),ferry=vec(world.ferryPos,[-213,-199]);
-  const port=new T.Vector3(-180,0,-180),villa=new T.Vector3(-120,0,120);
+  const port=new T.Vector3(-120,0,-120),villa=new T.Vector3(-120,0,120);
   const drops=[new T.Vector3(60,0,60),new T.Vector3(120,0,60),new T.Vector3(120,0,120)];
   const state={done:0,active:false,index:0,stage:0,timer:0,drop:0,rivals:[],marker:null,markedCar:null,dialogue:'',dialogueUntil:0,completion:null};
   const ring=new T.Mesh(new T.TorusGeometry(2,.16,8,40),new T.MeshBasicMaterial({color:0xffda85}));ring.rotation.x=Math.PI/2;scene.add(ring);
