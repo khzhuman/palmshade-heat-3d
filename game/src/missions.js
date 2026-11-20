@@ -1,113 +1,44 @@
-import { PAYOUTS } from './config.js';
-import { makePerson, posePerson } from './world.js';
-
 export const JOBS = [
-  {id:1,title:'Hot Dock',payout:PAYOUTS[1],dialogue:['Port security clocks out in a minute. Take the marked car to my shop.'],stages:['Steal the marked car at Old Port','Deliver the car to Shine Shop']},
-  {id:2,title:'Neon Run',payout:PAYOUTS[2],dialogue:['Three drops on the strip. Keep moving; dispatch already knows your plates.'],stages:['Collect the first drop','Collect the second drop','Collect the last drop']},
-  {id:3,title:'Hill Debt',payout:PAYOUTS[3],dialogue:['The villa has my case and two runners who won’t give it back. I need you on foot.'],stages:['Deal with both rival runners','Pick up Mara’s case','Escape to Shine Shop']},
-  {id:4,title:'Last Ferry',payout:PAYOUTS[4],dialogue:['The ferry leaves on the minute. If a cruiser blocks the ramp, find another way through.'],stages:['Reach the ferry ramp before departure']}
+  {title:'Hot Dock',payout:800,stages:['STEAL THE MARKED CAR','DELIVER TO SHINE SHOP'],limit:150},
+  {title:'Neon Run',payout:1500,stages:['COLLECT THE THREE DROPS'],wanted:2},
+  {title:'Hill Debt',payout:2500,stages:['DRIVE TO THE VILLA','CLEAR THE RIVALS','GRAB THE CASE','ESCAPE TO SHINE SHOP']},
+  {title:'Last Ferry',payout:4000,stages:['REACH THE FERRY RAMP'],wanted:3,limit:120}
 ];
-
-export function createMissions(world, player, police, hud, hooks) {
-  const {shop,dock,villa,ferry} = world.landmarks;
-  const {scene,vehicles,combat} = hooks;
-  let jobIndex = Math.min(4, Math.max(0, hooks.jobsDone ?? 0));
-  let stage = 0, active = null, clock = 0, marked = null, rivals = [], phase = 0;
-  const v = (x,z) => new THREE.Vector3(x,0,z);
-  const starts = [shop,shop,villa,shop];
-  const distance = p => p ? Math.hypot(player.position.x-p.x,player.position.z-p.z) : Infinity;
-  const near = (p,n=8) => distance(p) < n;
-  function open(x,z) {
-    for (let r=0;r<=24;r+=2) {
-      for (let i=0;i<8;i++) {
-        const a=i*Math.PI/4, px=x+Math.cos(a)*r, pz=z+Math.sin(a)*r;
-        if (!world.blocked(px,pz,1.5)) return v(px,pz);
-      }
-    }
-    return v(x,z);
+export function createMissions(T,scene,player,world,police,effects) {
+  const vec=(p,f)=>p?.clone?p.clone():new T.Vector3(p?.x??f[0],0,p?.z??f[1]);
+  const shop=vec(world.shineShopPos,[0,0]),mara=vec(world.maraPos,[8,8]),ferry=vec(world.ferryPos,[-213,-199]);
+  const port=new T.Vector3(-180,0,-180),villa=new T.Vector3(-120,0,120);
+  const drops=[new T.Vector3(60,0,60),new T.Vector3(120,0,60),new T.Vector3(120,0,120)];
+  const state={done:0,active:false,index:0,stage:0,timer:0,drop:0,rivals:[],marker:null,markedCar:null,dialogue:'',dialogueUntil:0,completion:null};
+  const ring=new T.Mesh(new T.TorusGeometry(2,.16,8,40),new T.MeshBasicMaterial({color:0xffda85}));ring.rotation.x=Math.PI/2;scene.add(ring);
+  const beam=new T.Mesh(new T.CylinderGeometry(.15,.15,7,8),new T.MeshBasicMaterial({color:0xffda85,transparent:true,opacity:.5}));scene.add(beam);
+  const caseMesh=new T.Mesh(new T.BoxGeometry(.9,.5,.65),new T.MeshStandardMaterial({color:0xe5bc66,metalness:.6,roughness:.3}));caseMesh.position.copy(villa).add(new T.Vector3(0,.4,0));caseMesh.visible=false;scene.add(caseMesh);
+  function rival(x,z) {
+    const mesh=new T.Group();const mat=new T.MeshStandardMaterial({color:0xb53559});
+    const torso=new T.Mesh(new T.BoxGeometry(.8,1.1,.5),mat);torso.position.y=1.2;mesh.add(torso);
+    const head=new T.Mesh(new T.SphereGeometry(.3,10,8),new T.MeshStandardMaterial({color:0xb9744e}));head.position.y=2;mesh.add(head);
+    for(const n of [-.23,.23]){const leg=new T.Mesh(new T.BoxGeometry(.25,.8,.3),new T.MeshStandardMaterial({color:0x222b40}));leg.position.set(n,.4,0);mesh.add(leg);}
+    mesh.position.set(x,0,z);scene.add(mesh);return {mesh,position:mesh.position,health:100,maxHealth:100,rival:true,attack:0};
   }
-  function district(name,fallback) {
-    const found = hooks.districts?.find(d=>d.name.includes(name));
-    return found ? open((found.x0+found.x1)/2,(found.z0+found.z1)/2) : fallback;
+  function spawnRivals(){for(const r of state.rivals)scene.remove(r.mesh);state.rivals=[rival(villa.x-4,villa.z),rival(villa.x+4,villa.z-4)];}
+  function start(index=state.done%4) {
+    state.index=index;state.active=true;state.stage=0;state.drop=0;state.timer=JOBS[index].limit??0;state.completion=null;
+    state.dialogue=['MARA: A hot set of wheels is waiting at Old Port. Bring it home clean.','MARA: Three drops. Neon Mile. Keep moving, the whole strip is listening.','MARA: The villa crew has our case. Park up, then finish this on foot.','MARA: Last ferry leaves soon. Make that ramp before the island locks down.'][index];state.dialogueUntil=10;
+    if(index===0&&state.markedCar){state.markedCar.position.copy(port);state.markedCar.speed=0;state.markedCar.parked=true;}
+    if(JOBS[index].wanted)police.setWanted(JOBS[index].wanted);if(index===2)spawnRivals();
   }
-  const neon = district('Neon',shop);
-  const dx = Math.abs(neon.x)>160 ? -Math.sign(neon.x) : 1;
-  const drops = [open(neon.x-25*dx,neon.z),open(neon.x+8*dx,neon.z+22),open(neon.x+40*dx,neon.z-10)];
-  const caseAt = open(villa.x+8,villa.z);
-  function marker() {
-    if (!active) return starts[jobIndex];
-    if (active.id===1) return stage ? shop : marked;
-    if (active.id===2) return drops[stage];
-    if (active.id===3) return stage===0 ? rivals.find(r=>!r.dead)?.mesh.position ?? villa : stage===1 ? caseAt : shop;
-    return ferry;
+  function complete(){const job=JOBS[state.index];player.cash+=job.payout;state.done=Math.min(4,state.done+1);state.active=false;state.completion={title:job.title,payout:job.payout,jobs:state.done,cash:player.cash,topWanted:police.topWanted};effects?.text(player.position,`+$${job.payout}`, '#ffda85');}
+  function objective(){if(!state.active)return mara;if(state.index===0)return state.stage?shop:state.markedCar?.mesh?.position??port;if(state.index===1)return drops[Math.min(2,state.drop)];if(state.index===2)return state.stage>=3?shop:villa;return ferry;}
+  function update(dt,interact=false){
+    state.dialogueUntil=Math.max(0,state.dialogueUntil-dt);state.marker=objective();ring.position.copy(state.marker);ring.position.y=.2;beam.position.copy(state.marker);beam.position.y=3.5;caseMesh.visible=state.active&&state.index===2&&state.stage===2;
+    if(!state.active){if(interact&&!player.currentCar&&player.position.distanceTo(mara)<6)start();return;}
+    if(JOBS[state.index].limit){state.timer-=dt;if(state.timer<=0){state.active=false;state.dialogue='MARA: Time is up. Come back and we will try again.';state.dialogueUntil=7;return;}}
+    const near=player.position.distanceTo(state.marker)<6;
+    if(state.index===0){if(!state.stage&&player.currentCar&&(!state.markedCar||player.currentCar===state.markedCar))state.stage=1;else if(state.stage&&near&&player.currentCar===state.markedCar)complete();}
+    if(state.index===1&&near){state.drop++;effects?.text(player.position,`DROP ${state.drop}/3`);if(state.drop===3)complete();}
+    if(state.index===2){if(!state.stage&&near&&player.currentCar)state.stage=1;if(state.stage===1&&state.rivals.every(r=>r.health<=0))state.stage=2;if(state.stage===2&&near&&!player.currentCar)state.stage=3;else if(state.stage===3&&near)complete();}
+    if(state.index===3&&near)complete();
   }
-  function clearRivals() {
-    for (const r of rivals) { r.target?.dispose(); scene.remove(r.mesh); }
-    rivals = [];
-  }
-  function finish() {
-    const job = active;
-    active = null;
-    clearRivals();
-    jobIndex++;
-    hooks.onJobComplete(job);
-  }
-  function fail(line) {
-    if (!active) return;
-    active = null;
-    clearRivals();
-    hud.showDialogue(line,2600);
-  }
-  function acceptNearest() {
-    if (active || jobIndex>=JOBS.length || !near(starts[jobIndex],12)) return false;
-    active = JOBS[jobIndex]; stage=0; clock=0;
-    hud.showDialogue(active.dialogue[0],4800);
-    if (active.id===1) {
-      const p = open(dock.x+7,dock.z);
-      marked = vehicles.spawn({x:p.x,z:p.z,yaw:0,color:0xffaa44,parked:true});
-    }
-    if (active.id===2) police.setWanted(Math.max(2,police.wanted));
-    if (active.id===3) for (const [i,color] of [0xed574f,0xa05ae0].entries()) {
-      const mesh = makePerson(color);
-      mesh.position.copy(open(villa.x+10+i*7,villa.z+5+i*5));
-      scene.add(mesh);
-      const r = {mesh,dead:false,cool:2+i};
-      r.target = combat.registerTarget(mesh,60,()=>{r.dead=true; scene.remove(mesh);});
-      rivals.push(r);
-    }
-    if (active.id===4) { clock=95; police.setWanted(Math.max(3,police.wanted)); }
-    return true;
-  }
-  function update(dt) {
-    if (!active) return;
-    phase+=dt;
-    if (clock>0 && (clock-=dt)<=0) { fail('Too late. Come back to the marker and we’ll reset.'); return; }
-    if (active.id===1) {
-      if (!stage && player.car===marked) { stage=1; clock=90; }
-      if (stage && marked.disabled) fail('That car is finished. Come back for another run.');
-      else if (stage && player.car===marked && near(shop,13)) finish();
-    } else if (active.id===2) {
-      if (police.wanted<2) police.setWanted(2);
-      if (near(drops[stage]) && ++stage===drops.length) finish();
-    } else if (active.id===3) {
-      if (!stage) {
-        for (const r of rivals) if (!r.dead) {
-          const p = r.mesh.position, gap=distance(p);
-          r.mesh.rotation.y=Math.atan2(player.position.x-p.x,player.position.z-p.z);
-          posePerson(r.mesh,'idle',phase);
-          if (gap<20 && !player.car && (r.cool-=dt)<=0) {
-            r.cool=1.7; hooks.onRivalAttack?.(p); player.hurt(8);
-          }
-        }
-        if (rivals.every(r=>r.dead)) stage++;
-      } else if (stage===1 && !player.car && near(caseAt,5)) { stage++; police.setWanted(Math.max(2,police.wanted)); }
-      else if (stage===2 && near(shop,12)) finish();
-    } else {
-      if (police.wanted<3) police.setWanted(3);
-      if (near(ferry,13)) finish();
-    }
-  }
-  return {get active(){return active;},get jobIndex(){return jobIndex;},marker,update,acceptNearest,fail,
-    canAccept:()=>!active && jobIndex<4 && near(starts[jobIndex],12),
-    stageText:()=>active ? 'JOB '+active.id+'/4 · '+active.title+' · '+(stage+1)+'/'+active.stages.length+' · NEXT: '+active.stages[stage]+(clock>0?' · '+Math.ceil(clock)+'s':'') : null};
+  function line(){if(!state.active)return `JOB ${state.done%4+1}/4 · ${JOBS[state.done%4].title} · AVAILABLE · NEXT: TALK TO MARA`;const job=JOBS[state.index];return `JOB ${state.index+1}/4 · ${job.title} · ${job.stages[state.stage]}${state.timer?' · '+Math.ceil(state.timer)+'s':''} · NEXT: ${state.index===1?`DROP ${state.drop+1}/3`:job.stages[state.stage]}`;}
+  return Object.assign(state,{start,complete,update,line,objective,spawnRivals,shop,mara,ferry,port,villa});
 }

@@ -1,36 +1,33 @@
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
-import { extname, resolve, sep } from 'node:path';
+import { stat, realpath } from 'node:fs/promises';
+import { dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = await realpath(fileURLToPath(new URL('./game/', import.meta.url)));
-const arg = process.argv.indexOf('--port');
-const port = Number(arg < 0 ? process.argv.find(a => a.startsWith('--port='))?.slice(7) ?? 8080 : process.argv[arg + 1]);
-const types: Record<string, string> = {
+const root = resolve(dirname(fileURLToPath(import.meta.url)), 'game');
+const flag = process.argv.indexOf('--port');
+const port = flag < 0 ? 8080 : Number(process.argv[flag + 1]);
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Expected --port followed by a port from 1 to 65535');
+const mime: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
-  '.json': 'application/json', '.jpg': 'image/jpeg', '.png': 'image/png',
-  '.svg': 'image/svg+xml', '.webp': 'image/webp', '.wasm': 'application/wasm'
+  '.txt': 'text/plain; charset=utf-8', '.json': 'application/json; charset=utf-8',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
 };
-
-createServer(async (req, res) => {
-  const missing = () => res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
-  if (req.method !== 'GET' && req.method !== 'HEAD') { missing(); return; }
+const server = createServer(async (request, response) => {
+  if (request.method !== 'GET' && request.method !== 'HEAD') { response.writeHead(405, { Allow: 'GET, HEAD' }); response.end(); return; }
   try {
-    const path = decodeURIComponent((req.url ?? '/').split('?')[0]);
-    if (!path.startsWith('/') || path.includes('\0') || path.includes('\\')) { missing(); return; }
-    const candidate = resolve(root, '.' + (path === '/' ? '/index.html' : path));
-    if (!candidate.startsWith(root + sep)) { missing(); return; }
-    const file = await realpath(candidate);
-    const info = await stat(file);
-    if (!file.startsWith(root + sep) || !info.isFile()) { missing(); return; }
-    res.writeHead(200, {
-      'Content-Type': types[extname(file)] ?? 'application/octet-stream',
-      'Content-Length': info.size,
-      'X-Content-Type-Options': 'nosniff'
-    });
-    if (req.method === 'HEAD') res.end();
-    else createReadStream(file).on('error', error => res.destroy(error)).pipe(res);
-  } catch { missing(); }
-}).listen(port, () => console.log('Palmshade is serving at http://localhost:' + port));
+    const pathname = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
+    if (pathname.includes('\0') || pathname.includes('\\')) throw new Error('Invalid path');
+    const candidate = resolve(root, '.' + (pathname === '/' ? '/index.html' : pathname));
+    if (candidate !== root && !candidate.startsWith(root + sep)) throw new Error('Outside root');
+    const path = await realpath(candidate);
+    if (!path.startsWith(root + sep)) throw new Error('Outside root');
+    const info = await stat(path);
+    if (!info.isFile()) throw new Error('Not a file');
+    response.writeHead(200, { 'Content-Type': mime[extname(path).toLowerCase()] ?? 'application/octet-stream', 'Content-Length': info.size, 'Cache-Control': 'no-cache' });
+    if (request.method === 'HEAD') response.end();
+    else createReadStream(path).on('error', () => response.destroy()).pipe(response);
+  } catch { response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); response.end('Not found'); }
+});
+server.listen(port, '0.0.0.0', () => console.log(`PALMSHADE HEAT 3D: http://localhost:${port}`));

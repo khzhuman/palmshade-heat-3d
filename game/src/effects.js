@@ -1,70 +1,20 @@
-export function createEffects(scene) {
-  const pools={};
-  const sphere=new THREE.IcosahedronGeometry(1,0);
-  const material=(color)=>new THREE.MeshBasicMaterial({color,transparent:true,depthWrite:false});
-  function take(kind,make,seconds) {
-    const list=pools[kind]??(pools[kind]=[]);
-    let item=list.find(e=>e.life<=0);
-    if(!item&&list.length<32) {
-      item={object:make(),life:0,velocity:new THREE.Vector3()};
-      list.push(item);scene.add(item.object);
-    }
-    item??=list.reduce((a,b)=>a.life<b.life?a:b);
-    item.life=item.full=seconds;item.object.visible=true;item.object.material.opacity=1;item.velocity.set(0,0,0);
-    return item;
-  }
-  function ball(kind,pos,color,size,seconds) {
-    const item=take(kind,()=>new THREE.Mesh(sphere,material(color)),seconds);
-    item.object.material.color.set(color);
-    item.object.position.copy(pos);item.object.scale.setScalar(size);item.size=size;
-    return item;
-  }
-  function flash(pos,dir) {
-    const core=ball('flash',pos,0xffe7a0,.38,.13);
-    core.object.scale.set(.65,.3,.3);
-    core.object.quaternion.setFromUnitVectors(new THREE.Vector3(1,0,0),dir);
-    ball('flash',pos.clone().addScaledVector(dir,.35),0xffae48,.22,.10);
-  }
-  function tracer(a,b) {
-    const item=take('tracer',()=>new THREE.Line(new THREE.BufferGeometry().setFromPoints([a,b]),
-      new THREE.LineBasicMaterial({color:0xffd568,transparent:true,depthWrite:false})),.17);
-    const p=item.object.geometry.attributes.position;
-    p.setXYZ(0,a.x,a.y,a.z);p.setXYZ(1,b.x,b.y,b.z);p.needsUpdate=true;
-    item.object.frustumCulled=false;
-  }
-  function spark(pos) {
-    for(let i=0;i<6;i++) {
-      const a=i*2.4;
-      const item=ball('spark',pos, i%2?0xffa440:0xffffb4,.09,.29);
-      item.velocity.set(Math.sin(a)*3,1.5+i*.23,Math.cos(a)*3);
+export function createEffects(T,scene,camera) {
+  const items=[];let frozen=false,seed=Number(new URLSearchParams(location.search).get('seed')??7)>>>0;
+  const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+  const canvas=document.createElement('canvas');canvas.width=canvas.height=64;const c=canvas.getContext('2d');const gradient=c.createRadialGradient(32,32,0,32,32,32);gradient.addColorStop(0,'#fff9d8');gradient.addColorStop(.18,'#ffdd8b');gradient.addColorStop(1,'rgba(255,170,60,0)');c.fillStyle=gradient;c.fillRect(0,0,64,64);const glowTexture=new T.CanvasTexture(canvas);
+  function add(object,life,velocity){scene.add(object);items.push({object,life,total:life,velocity});return object;}
+  function halo(position,color=0xffd99b,size=3,life=0){const sprite=new T.Sprite(new T.SpriteMaterial({map:glowTexture,color,transparent:true,depthWrite:false,blending:T.AdditiveBlending}));sprite.position.copy(position);sprite.scale.setScalar(size);if(life)add(sprite,life);else scene.add(sprite);return sprite;}
+  function muzzle(position){return halo(position,0xffdd91,2.3,.13);}
+  function tracer(start,end,color=0xffe8a6){const geo=new T.BufferGeometry().setFromPoints([start,end]);return add(new T.Line(geo,new T.LineBasicMaterial({color,transparent:true,opacity:.95,depthWrite:false})),.18);}
+  function spark(position,color=0xffd46a){for(let i=0;i<9;i++){const p=new T.Mesh(new T.SphereGeometry(.045,4,3),new T.MeshBasicMaterial({color,transparent:true}));p.position.copy(position);add(p,.35,new T.Vector3((random()-.5)*7,random()*5,(random()-.5)*7));}}
+  function text(position,value,color='#ffda85'){const el=document.createElement('div');el.className='event-text';el.innerText=value;el.style.color=color;document.getElementById('events').append(el);items.push({el,position:position.clone(),life:1.3,total:1.3});}
+  function smoke(position){const puff=new T.Sprite(new T.SpriteMaterial({map:glowTexture,color:0x33404a,transparent:true,opacity:.3,depthWrite:false}));puff.position.copy(position);puff.scale.setScalar(2);add(puff,1.5,new T.Vector3(.3,2,.2));}
+  function update(dt,cars=[]){
+    if(!frozen)for(const car of cars)if((car.health??100)<35&&random()<dt*10)smoke((car.mesh?.position??car.position).clone().add(new T.Vector3(0,1.5,1)));
+    for(let i=items.length-1;i>=0;i--){const a=items[i];if(!frozen)a.life-=dt;if(a.life<=0){if(a.el)a.el.remove();else{scene.remove(a.object);a.object.geometry?.dispose();a.object.material?.dispose();}items.splice(i,1);continue;}
+      if(a.el){if(!frozen)a.position.y+=dt;const p=a.position.clone().project(camera);a.el.style.left=`${(p.x*.5+.5)*innerWidth}px`;a.el.style.top=`${(-p.y*.5+.5)*innerHeight}px`;a.el.style.opacity=p.z>1?'0':String(Math.min(1,a.life));}
+      else{if(a.velocity&&!frozen)a.object.position.addScaledVector(a.velocity,dt);a.object.material.opacity=a.life/a.total;}
     }
   }
-  function smoke(pos,amount=1) {
-    const item=ball('smoke',pos,0x565264,.36*amount,.85);
-    item.velocity.set(.35,1.8,.28);
-  }
-  function glow(pos) {ball('glow',pos,0xffdf8a,.45,.08);}
-  function floatText(pos,value,color='#ffffff') {
-    const item=take('text',()=>{
-      const canvas=document.createElement('canvas');canvas.width=256;canvas.height=64;
-      const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(canvas),transparent:true,depthTest:false,depthWrite:false}));
-      sprite.renderOrder=10;return sprite;
-    },.95);
-    const map=item.object.material.map, ctx=map.image.getContext('2d');
-    ctx.clearRect(0,0,256,64);ctx.font='bold 40px monospace';ctx.textAlign='center';ctx.lineWidth=6;
-    ctx.strokeStyle='#342339';ctx.fillStyle=color;
-    ctx.strokeText(value,128,46);ctx.fillText(value,128,46);map.needsUpdate=true;
-    item.object.position.copy(pos);item.object.scale.set(4,1,1);item.velocity.y=1.9;
-  }
-  function update(dt) {
-    for(const [kind,list] of Object.entries(pools)) for(const item of list) {
-      if(item.life<=0)continue;
-      item.life-=dt;item.object.visible=item.life>0;
-      item.object.position.addScaledVector(item.velocity,dt);
-      item.object.material.opacity=Math.max(0,item.life/item.full)*(kind==='smoke'?.52:1);
-      if(kind==='smoke')item.object.scale.setScalar(item.size+(item.full-item.life)*1.1);
-      if(kind==='spark')item.velocity.y-=dt*10;
-    }
-  }
-  return {flash,tracer,spark,smoke,floatText,glow,update};
+  return {muzzle,tracer,spark,text,halo,smoke,update,setFrozen(value){frozen=value;}};
 }
