@@ -6,27 +6,34 @@ export function loadThree() {
     }
 
     fetch('../vendor/three.b64.txt')
-      .then((response) => {
-        if (!response.ok) throw new Error(`Three.js bundle request failed: ${response.status}`);
-        return response.text();
+      .then((reply) => {
+        if (!reply.ok) {
+          throw new Error(`Three.js bundle request failed: ${reply.status}`);
+        }
+        return reply.text();
       })
-      .then((encoded) => {
-        const binary = atob(encoded.replace(/\s/g, ''));
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-        const url = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
-        const script = document.createElement('script');
-        script.src = url;
-        script.onload = () => {
-          URL.revokeObjectURL(url);
-          if (window.THREE) resolve(window.THREE);
-          else reject(new Error('Three.js script loaded without exposing window.THREE'));
+      .then((source) => {
+        const decoded = atob(source.replace(/\s/g, ''));
+        const payload = new Uint8Array(decoded.length);
+        for (let offset = 0; offset < decoded.length; offset += 1) {
+          payload[offset] = decoded.charCodeAt(offset);
+        }
+        const objectUrl = URL.createObjectURL(new Blob([payload], { type: 'text/javascript' }));
+        const element = document.createElement('script');
+        element.src = objectUrl;
+        element.onload = () => {
+          URL.revokeObjectURL(objectUrl);
+          if (window.THREE) {
+            resolve(window.THREE);
+          } else {
+            reject(new Error('Three.js script loaded without exposing window.THREE'));
+          }
         };
-        script.onerror = () => {
-          URL.revokeObjectURL(url);
+        element.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
           reject(new Error('Three.js script could not be loaded'));
         };
-        document.head.appendChild(script);
+        document.head.appendChild(element);
       })
       .catch(reject);
   });

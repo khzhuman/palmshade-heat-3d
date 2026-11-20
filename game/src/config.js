@@ -1,3 +1,4 @@
+// Shared colours for the city and its interface.
 export const palette = {
   sun: 0xf6bc68,
   sky: 0x83c9d5,
@@ -14,11 +15,24 @@ export const palette = {
   palm: 0x387d61
 };
 
+// Keep the district records in their established lookup order.
 export const districts = [
-  { name: 'Old Port', minX: -240, maxX: 0, minZ: 0, maxZ: 240, tint: 0xd1a66f },
-  { name: 'Neon Mile', minX: 0, maxX: 240, minZ: 0, maxZ: 240, tint: 0x55b9bf },
-  { name: 'Coral Heights', minX: 0, maxX: 240, minZ: -240, maxZ: 0, tint: 0xe58f84 },
-  { name: 'The Flats', minX: -240, maxX: 0, minZ: -240, maxZ: 0, tint: 0x9f88bd }
+  {
+    name: 'Old Port', minX: -240, maxX: 0,
+    minZ: 0, maxZ: 240, tint: 0xd1a66f
+  },
+  {
+    name: 'Neon Mile', minX: 0, maxX: 240,
+    minZ: 0, maxZ: 240, tint: 0x55b9bf
+  },
+  {
+    name: 'Coral Heights', minX: 0, maxX: 240,
+    minZ: -240, maxZ: 0, tint: 0xe58f84
+  },
+  {
+    name: 'The Flats', minX: -240, maxX: 0,
+    minZ: -240, maxZ: 0, tint: 0x9f88bd
+  }
 ];
 
 export const prices = {
