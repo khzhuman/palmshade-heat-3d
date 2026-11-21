@@ -5,13 +5,22 @@ export function loadThree() {
       return;
     }
 
-    fetch('../vendor/three.b64.txt')
-      .then((reply) => {
-        if (!reply.ok) {
-          throw new Error(`Three.js bundle request failed: ${reply.status}`);
-        }
-        return reply.text();
-      })
+    const PART_COUNT = 30;
+    const partRequests = [];
+    for (let index = 0; index < PART_COUNT; index += 1) {
+      const name = `tp-${String(index).padStart(2, '0')}.b64.txt`;
+      partRequests.push(
+        fetch(`../vendor/three/${name}`).then((reply) => {
+          if (!reply.ok) {
+            throw new Error(`Three.js bundle part ${name} request failed: ${reply.status}`);
+          }
+          return reply.text();
+        }),
+      );
+    }
+
+    Promise.all(partRequests)
+      .then((parts) => parts.join(''))
       .then((source) => {
         const decoded = atob(source.replace(/\s/g, ''));
         const payload = new Uint8Array(decoded.length);
