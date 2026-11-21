@@ -1,6 +1,12 @@
 export function createPolice(T, scene, player, effects) {
-  const state = { wanted: 0, topWanted: 0, bust: 0, unseen: 0, units: [], air: null };
+  const state = { wanted: 0, topWanted: 0, bust: 0, bustGrace: 0, unseen: 0, units: [], air: null };
   const paint = color => new T.MeshStandardMaterial({ color, roughness: .65 });
+
+  function spawnPosition(position) {
+    const offset = position.clone().sub(player.position);
+    if (offset.length() < 45) position.copy(player.position).addScaledVector(offset.normalize(), 45);
+    return position;
+  }
 
   function cruiser(index) {
     const mesh = new T.Group();
@@ -28,11 +34,14 @@ export function createPolice(T, scene, player, effects) {
     const unit = { mesh, position: mesh.position, callsign: `PALM-${index + 1}`, role: 'PURSUE', speed: 0, blockPosition: null };
     const angle = index * 2.4;
     mesh.position.copy(player.position).add(new T.Vector3(Math.sin(angle) * 35, 0, Math.cos(angle) * 35));
+    spawnPosition(mesh.position);
     return unit;
   }
 
   function setWanted(value) {
+    const previous = state.wanted;
     state.wanted = Math.max(0, Math.min(5, Math.round(value)));
+    if (!previous && state.wanted) state.bustGrace = 6;
     state.topWanted = Math.max(state.topWanted, state.wanted);
     state.unseen = 0;
   }
@@ -73,7 +82,7 @@ export function createPolice(T, scene, player, effects) {
       let destination = player.position.clone();
       if (unit.role === 'ROADBLOCK') {
         if (!unit.blockPosition || unit.blockPosition.distanceTo(player.position) > 100) {
-          unit.blockPosition = player.position.clone().addScaledVector(forward, 42).addScaledVector(side, (index - 4) * 3);
+          unit.blockPosition = spawnPosition(player.position.clone().addScaledVector(forward, 42).addScaledVector(side, (index - 4) * 3));
         }
         destination.copy(unit.blockPosition);
       } else unit.blockPosition = null;
@@ -121,7 +130,8 @@ export function createPolice(T, scene, player, effects) {
     }
 
     const speed = Math.abs(car?.speed ?? player.speed ?? 0);
-    state.bust = Math.max(0, Math.min(100, state.bust + (close && speed < 4 ? 23 : -15) * dt));
+    state.bust = Math.max(0, Math.min(100, state.bust + (close && speed < 4 ? (state.bustGrace > 0 ? 0 : 23) : -15) * dt));
+    state.bustGrace = Math.max(0, state.bustGrace - dt);
     if (state.wanted && seen) state.unseen = 0;
     else state.unseen += dt;
     if (state.wanted && state.unseen > 18) setWanted(state.wanted - 1);

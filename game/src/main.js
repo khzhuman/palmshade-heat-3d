@@ -62,7 +62,12 @@ export async function boot(){
   }else if(shot==='complete'){missions.start(0);missions.complete();moveTo(missions.shop.clone().add(new T.Vector3(0,0,5)));}
   else if(shot==='map'){minimap.setOpen(true);moveTo(missions.mara);}
   if(shot){peds.slice(0,10).forEach((p,i)=>{p.mesh.position.copy(player.position).add(new T.Vector3((i%5-2)*3,0,3+Math.floor(i/5)*5));p.state=i%2?'flee':'cower';p.fear=9999;});staged=shot==='hero'||shot==='gunfight';}
-  function cameraOffset(){if(shot==='hero')return new T.Vector3(8,42,-46);if(shot==='gunfight')return new T.Vector3(14,12,22);return player.currentCar?new T.Vector3(-Math.sin(yaw)*30,24,-Math.cos(yaw)*30):new T.Vector3(0,25,28);}
+  function cameraOffset(){if(shot==='hero')return new T.Vector3(8,42,-46);if(shot==='gunfight')return new T.Vector3(11,10,18);return player.currentCar?new T.Vector3(-Math.sin(yaw)*30,24,-Math.cos(yaw)*30):new T.Vector3(0,25,28);}
+  if(shot==='gunfight'){
+    const view=cameraOffset();
+    [[0,0,9],[2,5,10],[4,-4,11]].forEach(([i,x,z])=>{const p=peds[i];p.mesh.position.copy(player.position).add(new T.Vector3(x,0,z));p.state='cower';p.fear=9999;p.mesh.rotation.y=p.heading=Math.atan2(view.x-x,view.z-z);});
+    [[1,-7,5],[9,11,6]].forEach(([i,x,z])=>{peds[i].mesh.position.copy(player.position).add(new T.Vector3(x,0,z));});
+  }
   function focusCamera(immediate=false){const follow=player.position.clone().add(cameraOffset());if(immediate)camera.position.copy(follow);else camera.position.lerp(follow,.16);camera.lookAt(player.position.clone().add(new T.Vector3(0,shot==='hero'?7:1,0)));}
   focusCamera(true);
   function blocked(next,radius){return (world.colliders??[]).some(c=>{const b=c.box??c;return next.x>(b.min?.x??b.minX)-radius&&next.x<(b.max?.x??b.maxX)+radius&&next.z>(b.min?.z??b.minZ)-radius&&next.z<(b.max?.z??b.maxZ)+radius;});}
