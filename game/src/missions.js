@@ -33,6 +33,7 @@ export function createMissions(T, scene, player, world, police, effects) {
   }
 
   const shop = positionOrDefault(world.shineShopPos, [0, 0]);
+  const deliver = new T.Vector3(shop.x + 18, 0, shop.z - 16);
   const mara = positionOrDefault(world.maraPos, [8, 8]);
   const ferry = positionOrDefault(world.ferryPos, [-213, -199]);
   const port = new T.Vector3(-120, 0, -120);
@@ -150,6 +151,7 @@ export function createMissions(T, scene, player, world, police, effects) {
     player.cash += job.payout;
     state.done = Math.min(4, state.done + 1);
     state.active = false;
+    police.clear();
     state.completion = {
       title: job.title,
       payout: job.payout,
@@ -163,7 +165,7 @@ export function createMissions(T, scene, player, world, police, effects) {
   function objective() {
     if (!state.active) return mara;
     if (state.index === 0) {
-      return state.stage ? shop : state.markedCar?.mesh?.position ?? port;
+      return state.stage ? deliver : state.markedCar?.mesh?.position ?? port;
     }
     if (state.index === 1) return drops[Math.min(2, state.drop)];
     if (state.index === 2) return state.stage >= 3 ? shop : villa;
