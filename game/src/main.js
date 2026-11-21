@@ -95,7 +95,7 @@ export async function boot(){
     if(interact){
       if(atShop&&police.wanted&&!player.currentCar){const fee=150*police.wanted;if(player.cash>=fee){player.cash-=fee;police.clear();}else effects.text(player.position,'NOT ENOUGH CASH');}
       else if(atMara&&!missions.active&&!player.currentCar)missions.update(0,true);
-      else if(player.currentCar)exit();else if(nearest&&distance<6){enter(nearest);police.setWanted(Math.max(1,police.wanted));}interact=false;
+      else if(player.currentCar)exit();else if(nearest&&distance<6){enter(nearest);police.setWanted(Math.max(1,police.wanted));if(missions.active&&missions.wantedJob)police.departGrace=4;}interact=false;
     }
     if(!staged){updateTraffic(dt,{world,player});if(police.update(dt,clock))respawn('busted');missions.update(dt);combat.update(dt,keys.has('Space'));}
     else{police.update(0,clock);combat.update(0);missions.update(0);}

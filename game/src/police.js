@@ -1,5 +1,5 @@
 export function createPolice(T, scene, player, effects) {
-  const state = { wanted: 0, topWanted: 0, bust: 0, bustGrace: 0, unseen: 0, units: [], air: null };
+  const state = { wanted: 0, topWanted: 0, bust: 0, bustGrace: 0, departGrace: 0, unseen: 0, units: [], air: null };
   const paint = color => new T.MeshStandardMaterial({ color, roughness: .65 });
 
   function spawnPosition(position) {
@@ -100,7 +100,9 @@ export function createPolice(T, scene, player, effects) {
       seen ||= distance < 65;
       close ||= distance < 8;
       if (distance < 3.3 && car && dt > 0) {
-        car.speed = (car.speed ?? 0) * Math.exp(-dt * 5);
+        const contactSpeed = car.speed ?? 0;
+        const excess = Math.abs(contactSpeed) - 10;
+        if (excess > 0) car.speed = Math.sign(contactSpeed) * (10 + excess * Math.exp(-dt * 5));
         car.health = Math.max(0, (car.health ?? 100) - dt * 4);
         if (unit.role === 'PIT') {
           car.heading = (car.heading ?? heading) + dt * .8;
@@ -130,8 +132,9 @@ export function createPolice(T, scene, player, effects) {
     }
 
     const speed = Math.abs(car?.speed ?? player.speed ?? 0);
-    state.bust = Math.max(0, Math.min(100, state.bust + (close && speed < 4 ? (state.bustGrace > 0 ? 0 : 23) : -15) * dt));
+    state.bust = Math.max(0, Math.min(100, state.bust + (close && speed < 4 ? (state.bustGrace > 0 || state.departGrace > 0 ? 0 : 23) : -15) * dt));
     state.bustGrace = Math.max(0, state.bustGrace - dt);
+    state.departGrace = Math.max(0, state.departGrace - dt);
     if (state.wanted && seen) state.unseen = 0;
     else state.unseen += dt;
     if (state.wanted && state.unseen > 18) setWanted(state.wanted - 1);

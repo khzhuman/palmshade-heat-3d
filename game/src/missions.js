@@ -55,7 +55,8 @@ export function createMissions(T, scene, player, world, police, effects) {
     markedCar: null,
     dialogue: '',
     dialogueUntil: 0,
-    completion: null
+    completion: null,
+    wantedJob: false
   };
 
   const ring = new T.Mesh(
@@ -142,7 +143,11 @@ export function createMissions(T, scene, player, world, police, effects) {
       state.markedCar.speed = 0;
       state.markedCar.parked = true;
     }
-    if (JOBS[index].wanted) police.setWanted(JOBS[index].wanted);
+    state.wantedJob = !!JOBS[index].wanted;
+    if (state.wantedJob) {
+      police.setWanted(JOBS[index].wanted);
+      police.departGrace = 4;
+    }
     if (index === 2) spawnRivals();
   }
 

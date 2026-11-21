@@ -9,7 +9,7 @@ export function buildWorld(scene) {
   const labels = [];
   const spawnPoints = [];
   const shineShopPos = new T.Vector3(-34, 0, 18);
-  const maraPos = new T.Vector3(-179, 0, -150);
+  const maraPos = new T.Vector3(-180.5, 0, -150);
   const ferryPos = new T.Vector3(-213, 0, -199);
   let citySeed = 46819;
   function nextRandom() {
