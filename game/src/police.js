@@ -58,9 +58,9 @@ export function createPolice(T, scene, player, effects) {
     tail.position.z = 4;
     mesh.add(tail);
     scene.add(mesh);
-    const cone = new T.Mesh(new T.ConeGeometry(11, 30, 32, 1, true), new T.MeshBasicMaterial({ color: 0xffefb4, transparent: true, opacity: .13, depthWrite: false, side: T.DoubleSide, blending: T.AdditiveBlending }));
+    const cone = new T.Mesh(new T.ConeGeometry(11, 30, 32, 1, true), new T.MeshBasicMaterial({ color: 0xffbe55, transparent: true, opacity: .12, depthWrite: false, side: T.DoubleSide, blending: T.AdditiveBlending }));
     scene.add(cone);
-    const glow = new T.Mesh(new T.CircleGeometry(10, 40), new T.MeshBasicMaterial({ color: 0xffefb4, transparent: true, opacity: .2, depthWrite: false, blending: T.AdditiveBlending }));
+    const glow = new T.Mesh(new T.CircleGeometry(10, 40), new T.MeshBasicMaterial({ color: 0xffbe55, transparent: true, opacity: .15, depthWrite: false, blending: T.AdditiveBlending }));
     glow.rotation.x = -Math.PI / 2;
     scene.add(glow);
     return { mesh, rotor, cone, glow, callsign: 'AIR-1', role: 'SEARCH' };

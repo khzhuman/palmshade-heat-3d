@@ -14,15 +14,15 @@ export async function boot(){
   Object.assign(player,{cash:300,health:100,armour:50,mode:'foot',currentCar:null,speed:0});
   let seed=Number(query.get('seed')??17)>>>0;
   const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
-  const scene=new T.Scene();scene.background=new T.Color(0xe5aa7d);scene.fog=new T.Fog(0xe5aa7d,100,340);
+  const scene=new T.Scene();scene.background=new T.Color(0xf2a56b);scene.fog=new T.Fog(0xf2a56b,430,900);
   const camera=new T.PerspectiveCamera(shot==='hero'?62:55,innerWidth/innerHeight,.1,650);
   const renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=T.PCFSoftShadowMap;
   if(T.ACESFilmicToneMapping!==undefined){renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;}
-  document.getElementById('game').append(renderer.domElement);scene.add(new T.HemisphereLight(0xffedcc,0x456c78,2));
-  const sun=new T.DirectionalLight(0xffd49a,3);sun.position.set(-70,110,55);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-160,right:160,top:160,bottom:-160,far:400});scene.add(sun);
+  document.getElementById('game').append(renderer.domElement);scene.add(new T.HemisphereLight(0xffe3b3,0x3f6d78,0.65));
+  const sun=new T.DirectionalLight(0xffbe78,2.6);sun.position.set(-70,110,55);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-160,right:160,top:160,bottom:-160,far:400});scene.add(sun);
   const world=buildWorld(scene);spawnTraffic(scene,world,30,{seed:query.get('seed')??1});
-  function humanoid(color){
-    const mesh=new T.Group(),limbs=[],material=new T.MeshStandardMaterial({color}),skin=new T.MeshStandardMaterial({color:0xb77c56});
+  function humanoid(color,skinTone=0xb77c56){
+    const mesh=new T.Group(),limbs=[],material=new T.MeshStandardMaterial({color}),skin=new T.MeshStandardMaterial({color:skinTone});
     const body=new T.Mesh(new T.BoxGeometry(.6,.85,.38),material);body.position.y=1.1;mesh.add(body);
     const head=new T.Mesh(new T.SphereGeometry(.24,10,8),skin);head.position.y=1.78;mesh.add(head);
     for(const side of [-1,1]){
@@ -39,7 +39,7 @@ export async function boot(){
   addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());
   const peds=[];
   for(let i=0;i<38;i++){
-    const mesh=humanoid([0xefb95c,0xe67b77,0x67bdb1,0xd5d4b9][i%4]),street=(Math.floor(random()*7)-3)*60;
+    const mesh=humanoid([0xef476f,0xffd166,0x06d6a0,0x118ab2,0xf77f00,0x9b5de5,0xef8354,0x4cc9f0][i%8],[0x8a5a3b,0xb77c56,0x6e4530,0xd9a066,0x54382a,0xc98d5f][i%6]),street=(Math.floor(random()*7)-3)*60;
     mesh.position.set(i%2?street+8:(random()-.5)*420,0,i%2?(random()-.5)*420:street+8);peds.push({mesh,state:'walk',fear:0,heading:i%2?0:Math.PI/2,index:i});
   }
   function frighten(position){for(const ped of peds)if(ped.mesh.position.distanceTo(position)<48){ped.fear=7;ped.state=ped.index%2?'flee':'cower';ped.heading=Math.atan2(ped.mesh.position.x-position.x,ped.mesh.position.z-position.z);}}

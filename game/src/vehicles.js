@@ -1,7 +1,7 @@
 // Heading zero faces +Z; signed speed is measured in metres per second.
 // Each car shares its position vector with its mesh. Traffic advances every frame.
 export const cars = [];
-export const CAR_COLORS = [0xef8c78, 0x67b9b3, 0xf1cf7f, 0xb7a1cb, 0x91b67c, 0xe4d9bd, 0x537b9a];
+export const CAR_COLORS = [0xe8492f, 0xf2a007, 0x1f9e8f, 0x2f6fd0, 0xd63384, 0x37b24d, 0xffd43b, 0x845ef7];
 let serial = 1;
 let trafficSeed = 981731;
 function nextRandom() {
